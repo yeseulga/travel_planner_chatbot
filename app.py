@@ -452,6 +452,23 @@ CSS = """
 #header h1 { font-size: 2.2rem; font-weight: 700; margin: 0; color: #1a56db; }
 #header p  { color: #6b7280; font-size: 1rem; margin: 6px 0 0; }
 #session-box textarea { font-family: monospace !important; font-size: 12px !important; }
+
+/* Hugging Face Spaces (iframe) 환경에서 좌우 레이아웃이 세로로 무너지는 현상 방지 */
+#main-row {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    gap: 20px !important;
+    width: 100% !important;
+}
+#chat-col {
+    flex: 3 1 500px !important;
+    min-width: 320px !important;
+}
+#side-col {
+    flex: 1 1 260px !important;
+    min-width: 250px !important;
+}
 """
 
 
@@ -466,9 +483,9 @@ def build_ui() -> gr.Blocks:
         </div>
         """)
 
-        with gr.Row(equal_height=False):
+        with gr.Row(equal_height=False, elem_id="main-row"):
             # ── 채팅 영역 ─────────────────────────────────────────
-            with gr.Column(scale=3):
+            with gr.Column(scale=3, elem_id="chat-col"):
                 chatbot = gr.Chatbot(label="대화", height=520)
                 with gr.Row():
                     msg_box = gr.Textbox(
@@ -479,7 +496,7 @@ def build_ui() -> gr.Blocks:
                 clear_btn = gr.Button("🗑️ 대화 초기화", variant="primary")
 
             # ── 세션 / 저장 패널 ──────────────────────────────────
-            with gr.Column(scale=1, min_width=220):
+            with gr.Column(scale=1, min_width=220, elem_id="side-col"):
                 gr.Markdown("### 📋 세션 정보")
                 gr.HTML(f"""
                 <p style="font-size:11px; color:#6b7280; margin:0 0 8px; line-height:1.6;">
