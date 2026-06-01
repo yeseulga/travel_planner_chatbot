@@ -2,6 +2,7 @@ import json
 import time
 import uuid
 import re
+import html as html_module
 from urllib.parse import quote, unquote
 from datetime import datetime
 from pathlib import Path
@@ -11,7 +12,6 @@ load_dotenv()
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import HumanMessage, AIMessage
-from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnableParallel, RunnableLambda
 from langchain_openai import ChatOpenAI
 from langchain_community.tools.tavily_search import TavilySearchResults
@@ -36,6 +36,23 @@ MISSING_MESSAGES = {
 
 CHITCHAT_RESPONSE = "이 챗봇은 여행 관련된 응답만 제공 가능합니다. 여행지와 기간을 알려주시면 계획을 짜드릴게요! ✈️"
 
+# Day-color palette for map markers (wraps after 7 days)
+DAY_COLORS = ['red', 'blue', 'green', 'purple', 'orange', 'darkred', 'cadetblue']
+
+MAP_EMPTY_HTML = (
+    "<p style='color:#9ca3af;text-align:center;padding:40px;font-size:14px'>"
+    "일정을 생성하면 경로 지도가 표시됩니다 🗺️</p>"
+)
+MAP_LOADING_HTML = (
+    "<p style='text-align:center;padding:40px;font-size:14px'>"
+    "🔍 지도 좌표를 가져오는 중입니다... (장소 수에 따라 10~30초 소요)</p>"
+)
+MAP_ERROR_HTML = (
+    "<p style='color:#9ca3af;text-align:center;padding:20px;font-size:13px'>"
+    "지도를 표시하지 못했습니다. 각 장소의 Google Maps 링크를 이용해주세요.</p>"
+)
+
+
 # ============================================================
 # Structured Output Models
 # ============================================================
@@ -51,6 +68,17 @@ class TravelIntent(BaseModel):
 
 class TripDistricts(BaseModel):
     districts: list[str]
+
+
+class PlaceForMap(BaseModel):
+    name: str          # 표시용 이름 (한국어)
+    english_name: str  # Nominatim 검색용 영어 또는 현지어 이름
+    day: int           # 몇 일차 (1부터)
+
+
+class ItineraryAnalysis(BaseModel):
+    places: list[PlaceForMap]   # 지도용 장소 (관광지+맛집, 최대 10개)
+    budget_summary: str          # 예산 한 줄 요약
 
 
 # ============================================================
@@ -136,6 +164,26 @@ def get_planner_prompt() -> ChatPromptTemplate:
     ])
 
 
+def get_itinerary_analysis_prompt() -> ChatPromptTemplate:
+    return ChatPromptTemplate.from_messages([
+        ("system",
+         """여행 일정 텍스트에서 두 가지를 추출하세요.
+
+1. places: 지도에 표시할 장소 (최대 10개)
+   - 관광지, 맛집, 카페만 포함
+   - 숙소·공항·역·버스·패스·입장권 등 제외
+   - name: 한국어 표시명
+   - english_name: Nominatim 지오코딩용 영어 또는 현지어 이름
+     (예: "센소지" → "Senso-ji Temple", "에펠탑" → "Eiffel Tower")
+   - day: 몇 일차 (1부터)
+   - 중복 제거
+
+2. budget_summary: 예산 핵심만 한 줄 (예: "1일 약 10만원, 총 3박4일 약 40만원 예상")
+   - 예산 정보가 없으면 빈 문자열 반환"""),
+        ("human", "여행지: {dest}\n\n일정:\n{itinerary}"),
+    ])
+
+
 # ============================================================
 # Google Maps Link Post-Processor
 # ============================================================
@@ -215,44 +263,181 @@ def to_langchain_messages(history: list) -> list:
 
 
 def build_district_schedule(districts: list[str], duration: str) -> str:
-    """구역 리스트 → '1~2일차: 침사추이, 3일차: 센트럴, ...' 형식 문자열."""
     if not districts:
         return "구역 구분 없음"
-    lines = [f"- {d}" for d in districts]
-    return "\n".join(lines)
+    return "\n".join(f"- {d}" for d in districts)
 
 
 # ============================================================
-# Pipeline
+# Map: Extraction → Geocoding → Rendering
+# ============================================================
+def extract_itinerary_analysis(itinerary_text: str, dest: str) -> ItineraryAnalysis:
+    """일정 텍스트에서 지도용 장소 목록과 예산 요약 추출."""
+    prompt = get_itinerary_analysis_prompt()
+    llm = get_structured_llm(ItineraryAnalysis)
+    try:
+        return (prompt | llm).invoke({
+            "dest": dest,
+            "itinerary": itinerary_text[:4000],
+        })
+    except Exception as e:
+        print(f"[analysis] extraction error: {e}")
+        return ItineraryAnalysis(places=[], budget_summary="")
+
+
+def geocode_places(places: list[PlaceForMap], dest: str) -> list[dict]:
+    """Nominatim으로 장소 좌표 변환. 1.1초 간격 준수."""
+    try:
+        from geopy.geocoders import Nominatim
+        from geopy.exc import GeocoderTimedOut, GeocoderUnavailable
+    except ImportError:
+        print("[map] geopy not installed")
+        return []
+
+    geolocator = Nominatim(user_agent="trip_planner_hf_v2", timeout=5)
+    result = []
+
+    for place in places[:10]:  # hard cap: max 10
+        try:
+            query = place.english_name  # Nominatim은 영어/현지어로만 검색
+            location = geolocator.geocode(query)
+            if location:
+                result.append({
+                    "name": html_module.escape(place.name),
+                    "day": place.day,
+                    "lat": location.latitude,
+                    "lng": location.longitude,
+                })
+            time.sleep(1.1)  # Nominatim rate limit
+        except Exception:
+            time.sleep(1.1)
+            continue
+
+    return result
+
+
+def build_folium_map(geocoded: list[dict]) -> str | None:
+    """folium HTML 지도 생성. 마커 + 경로 폴리라인 포함."""
+    if not geocoded:
+        return None
+    try:
+        import folium
+    except ImportError:
+        print("[map] folium not installed")
+        return None
+
+    center_lat = sum(p["lat"] for p in geocoded) / len(geocoded)
+    center_lng = sum(p["lng"] for p in geocoded) / len(geocoded)
+
+    m = folium.Map(location=[center_lat, center_lng], zoom_start=13)
+
+    for place in geocoded:
+        color = DAY_COLORS[(place["day"] - 1) % len(DAY_COLORS)]
+        folium.Marker(
+            location=[place["lat"], place["lng"]],
+            popup=folium.Popup(
+                f"{place['name']} ({place['day']}일차)", max_width=200
+            ),
+            tooltip=place["name"],
+            icon=folium.Icon(color=color, icon="info-sign"),
+        ).add_to(m)
+
+    if len(geocoded) > 1:
+        coords = [[p["lat"], p["lng"]] for p in geocoded]
+        folium.PolyLine(coords, color="#6b7280", weight=2.5, opacity=0.8).add_to(m)
+
+    return m._repr_html_()
+
+
+def render_map(itinerary_data: dict) -> tuple:
+    """
+    .then()으로 호출되는 메인 지오코딩+렌더링 함수.
+    Returns: (map_html_str, accordion_gr_update)
+    """
+    if not itinerary_data or not itinerary_data.get("text") or not itinerary_data.get("dest"):
+        return gr.update(), gr.update(open=False)
+
+    text = itinerary_data["text"]
+    dest = itinerary_data["dest"]
+
+    try:
+        analysis = extract_itinerary_analysis(text, dest)
+        places = analysis.places
+        budget = analysis.budget_summary.strip()
+
+        if not places:
+            out = MAP_ERROR_HTML
+            if budget:
+                out += _budget_html(budget)
+            return out, gr.update(open=True)
+
+        geocoded = geocode_places(places, dest)
+
+        map_html = build_folium_map(geocoded)
+
+        if not map_html:
+            out = MAP_ERROR_HTML
+        else:
+            partial_miss = len(places) - len(geocoded)
+            warning = ""
+            if partial_miss > 0:
+                warning = (
+                    f"<p style='font-size:11px;color:#f59e0b;margin:4px 8px 0;'>"
+                    f"⚠️ {partial_miss}개 장소의 좌표를 가져오지 못했습니다.</p>"
+                )
+            out = warning + f'<div style="height:400px;overflow:hidden;">{map_html}</div>'
+
+        if budget:
+            out += _budget_html(budget)
+
+        return out, gr.update(open=True)
+
+    except Exception as e:
+        print(f"[map] render error: {e}")
+        return MAP_ERROR_HTML, gr.update(open=True)
+
+
+def _budget_html(budget: str) -> str:
+    safe = html_module.escape(budget)
+    return (
+        f"<div style='margin-top:8px;padding:10px 14px;"
+        f"background:#f0fdf4;border:1px solid #bbf7d0;"
+        f"border-radius:8px;font-size:13px;color:#166534;'>"
+        f"💰 <b>예산 요약:</b> {safe}</div>"
+    )
+
+
+# ============================================================
+# Pipeline  (병렬화: Stage1‖Stage2, Stage3‖Stage4)
 # ============================================================
 def prepare_context(user_input: str, history: list) -> tuple:
     """
-    LLM 3단계(router → slot → skeleton) + 병렬 웹 검색 수행.
-
     Returns:
-        quick_response (str | None)  — chitchat/missing info면 즉시 반환할 메시지
-        planner_inputs (dict | None) — 플래너에 넘길 입력값
-        timings (dict)               — 각 단계 소요시간(ms)
-        dest (str | None)            — 여행지 (링크 후처리에 사용)
+        quick_response (str | None)
+        planner_inputs (dict | None)
+        timings (dict)
+        dest (str | None)
     """
     timings: dict = {}
     t0 = time.time()
     lc_history = to_langchain_messages(history)
     base = {"input": user_input, "chat_history": lc_history}
 
-    # Stage 1 — 의도 분류
-    route: RouterIntent = (get_router_prompt() | get_structured_llm(RouterIntent)).invoke(base)
-    timings["router_ms"] = round((time.time() - t0) * 1000)
-    print(f"[pipeline] router={route.intent!r} ({timings['router_ms']}ms)")
+    # Stage 1‖2 — router + slots 동시 실행
+    t1 = time.time()
+    stage12 = RunnableParallel(
+        route=get_router_prompt() | get_structured_llm(RouterIntent),
+        slots=get_analysis_prompt() | get_structured_llm(TravelIntent),
+    )
+    results12 = stage12.invoke(base)
+    route: RouterIntent = results12["route"]
+    slots: TravelIntent = results12["slots"]
+    timings["stage12_ms"] = round((time.time() - t1) * 1000)
+    print(f"[pipeline] router={route.intent!r} dest={slots.destination!r} "
+          f"dur={slots.duration!r} ({timings['stage12_ms']}ms)")
 
     if route.intent == "chitchat":
         return CHITCHAT_RESPONSE, None, timings, None
-
-    # Stage 2 — 슬롯 추출
-    t1 = time.time()
-    slots: TravelIntent = (get_analysis_prompt() | get_structured_llm(TravelIntent)).invoke(base)
-    timings["slot_ms"] = round((time.time() - t1) * 1000)
-    print(f"[pipeline] dest={slots.destination!r} dur={slots.duration!r} ({timings['slot_ms']}ms)")
 
     dest, dur = slots.destination, slots.duration
     if not dest and not dur:
@@ -262,41 +447,36 @@ def prepare_context(user_input: str, history: list) -> tuple:
     if not dur:
         return MISSING_MESSAGES["duration"], None, timings, None
 
-    # Stage 3 — 구역 선정
+    # Stage 3‖4 — skeleton + 웹 검색 동시 실행
     t2 = time.time()
-    skeleton: TripDistricts = (get_skeleton_prompt() | get_structured_llm(TripDistricts)).invoke({
+    tavily = TavilySearchResults(max_results=3)
+    stage34_input = {
         "destination": dest,
         "duration": dur,
         "preferences": slots.preferences or "없음",
-    })
+    }
+    stage34 = RunnableParallel(
+        skeleton=RunnableLambda(
+            lambda x: (get_skeleton_prompt() | get_structured_llm(TripDistricts)).invoke(x)
+        ),
+        attractions=RunnableLambda(lambda _: tavily.invoke(f"{dest} 관광지 명소 추천")),
+        food=RunnableLambda(lambda _: tavily.invoke(f"{dest} 맛집 카페 레스토랑 추천")),
+        tips=RunnableLambda(lambda _: tavily.invoke(f"{dest} 여행 교통 팁 패스")),
+    )
+    results34 = stage34.invoke(stage34_input)
+    skeleton: TripDistricts = results34["skeleton"]
     districts = skeleton.districts[:3]
-    timings["skeleton_ms"] = round((time.time() - t2) * 1000)
-    print(f"[pipeline] districts={districts} ({timings['skeleton_ms']}ms)")
-
-    # Stage 4 — 병렬 웹 검색 (구역별이 아닌 목적별 3개 쿼리)
-    t3 = time.time()
-    tavily = TavilySearchResults(max_results=3)
-
-    def search(query: str) -> RunnableLambda:
-        return RunnableLambda(lambda _, q=query: tavily.invoke(q))
-
-    results = RunnableParallel(
-        attractions=search(f"{dest} 관광지 명소 추천"),
-        food=search(f"{dest} 맛집 카페 레스토랑 추천"),
-        tips=search(f"{dest} 여행 교통 팁 패스"),
-    ).invoke({})
-    timings["search_ms"] = round((time.time() - t3) * 1000)
-    print(f"[pipeline] search done ({timings['search_ms']}ms)")
+    timings["stage34_ms"] = round((time.time() - t2) * 1000)
+    print(f"[pipeline] districts={districts} ({timings['stage34_ms']}ms)")
 
     planner_inputs = {
         "destination": dest,
         "duration": dur,
         "preferences": slots.preferences or "없음",
-        # 구역은 검색 대신 플래너 지시문으로만 전달
         "district_schedule": build_district_schedule(districts, dur),
-        "attractions": format_search_results(results.get("attractions", [])),
-        "food": format_search_results(results.get("food", [])),
-        "tips": format_search_results(results.get("tips", [])),
+        "attractions": format_search_results(results34.get("attractions", [])),
+        "food": format_search_results(results34.get("food", [])),
+        "tips": format_search_results(results34.get("tips", [])),
     }
     return None, planner_inputs, timings, dest
 
@@ -345,7 +525,10 @@ def format_session_info(current_id: str) -> str:
         indicator = "● 현재" if sid == current_id else "○"
         remaining = MAX_MESSAGES_PER_SESSION - info["messages"]
         status = "⚠️ 한도 초과" if remaining <= 0 else f"남은 횟수: {remaining}개"
-        lines.append(f"{indicator}  [{sid}]\n  생성: {info['created_at']}\n  메시지: {info['messages']}개  |  {status}")
+        lines.append(
+            f"{indicator}  [{sid}]\n  생성: {info['created_at']}\n"
+            f"  메시지: {info['messages']}개  |  {status}"
+        )
     return "\n\n".join(lines)
 
 
@@ -382,32 +565,34 @@ def export_chat_json(history: list, session_id: str) -> tuple[str, str | None]:
 
 # ============================================================
 # Chat Handler  (generator → Gradio streaming)
+# Yields 4 outputs: msg_box, chatbot, session_box, last_itinerary_state
 # ============================================================
 def handle_chat(user_input: str, history: list, session_id: str):
+    empty_state: dict = {}
+
     if not user_input or not user_input.strip():
         msg = "가고 싶은 여행 장소와 대략적인 기간을 알려주시면 계획을 짜드리겠습니다. 😊"
-        new_history = history + [
+        yield "", history + [
             {"role": "user", "content": user_input},
             {"role": "assistant", "content": msg},
-        ]
-        yield "", new_history, format_session_info(session_id)
+        ], format_session_info(session_id), empty_state
         return
 
     # 사용자 메시지 즉시 표시
     yield "", history + [
         {"role": "user", "content": user_input},
         {"role": "assistant", "content": "🔍 여행 정보를 수집하고 있습니다..."},
-    ], format_session_info(session_id)
+    ], format_session_info(session_id), empty_state
 
     timings: dict = {}
     response = ""
+    dest = None
     try:
         quick_response, planner_inputs, timings, dest = prepare_context(user_input, history)
 
         if quick_response is not None:
             response = quick_response
         else:
-            # 플래너 스트리밍
             t_plan = time.time()
             messages = get_planner_prompt().format_messages(**planner_inputs)
             partial = ""
@@ -416,14 +601,16 @@ def handle_chat(user_input: str, history: list, session_id: str):
                 yield "", history + [
                     {"role": "user", "content": user_input},
                     {"role": "assistant", "content": partial},
-                ], format_session_info(session_id)
+                ], format_session_info(session_id), empty_state
             timings["planner_ms"] = round((time.time() - t_plan) * 1000)
             response = fix_maps_links(partial, dest)
 
     except Exception as e:
         response = f"⚠️ 오류가 발생했습니다: {e}"
 
-    timings["total_ms"] = sum(v for k, v in timings.items() if k.endswith("_ms") and k != "total_ms")
+    timings["total_ms"] = sum(
+        v for k, v in timings.items() if k.endswith("_ms") and k != "total_ms"
+    )
     print(f"[pipeline] total={timings['total_ms']}ms | {timings}")
 
     new_history = history + [
@@ -438,9 +625,14 @@ def handle_chat(user_input: str, history: list, session_id: str):
             f"\n\n---\n⚠️ 이 세션의 메시지 한도({MAX_MESSAGES_PER_SESSION}개)에 도달했습니다. "
             "'🆕 새 세션 시작' 버튼을 눌러 새 세션을 시작해주세요."
         )
-        new_history[-1] = {**new_history[-1], "content": new_history[-1]["content"] + warning}
+        new_history[-1] = {
+            **new_history[-1],
+            "content": new_history[-1]["content"] + warning,
+        }
 
-    yield "", new_history, format_session_info(session_id)
+    # 최종 yield: 지도용 state 설정 (planning 응답일 때만)
+    final_state = {"text": response, "dest": dest} if dest else empty_state
+    yield "", new_history, format_session_info(session_id), final_state
 
 
 # ============================================================
@@ -469,15 +661,27 @@ CSS = """
 @media (min-width: 800px) {
     #main-row {
         flex-direction: row !important;
-        flex-wrap: nowrap !important; /* 창이 다소 줄어도 옆으로 떨어지지 않게 고정 */
+        flex-wrap: nowrap !important;
     }
     #chat-col {
-        flex: 1 1 0% !important; /* 남는 가로 공간을 채팅창이 모두 채움 */
-        min-width: 450px !important; /* 채팅이 지나치게 좁아지지 않도록 제한 */
+        flex: 1 1 0% !important;
+        min-width: 450px !important;
     }
     #side-col {
-        flex: 0 0 300px !important; /* 우측 세션 정보 패널은 300px로 크기 고정 */
+        flex: 0 0 300px !important;
         min-width: 300px !important;
+    }
+}
+
+/* 지도 iframe 크기 제어 */
+#map-accordion iframe {
+    width: 100% !important;
+    height: 400px !important;
+    border: none !important;
+}
+@media (max-width: 799px) {
+    #map-accordion iframe {
+        height: 260px !important;
     }
 }
 """
@@ -486,6 +690,7 @@ CSS = """
 def build_ui() -> gr.Blocks:
     with gr.Blocks() as demo:
         current_session = gr.State("")
+        last_itinerary = gr.State({})   # {"text": ..., "dest": ...} | {}
 
         gr.HTML("""
         <div id="header">
@@ -505,6 +710,12 @@ def build_ui() -> gr.Blocks:
                     )
                     send_btn = gr.Button("전송 ➤", scale=1, variant="primary")
                 clear_btn = gr.Button("🗑️ 대화 초기화", variant="primary")
+
+                # 지도 아코디언 (일정 생성 후 자동 오픈)
+                with gr.Accordion(
+                    "🗺️ 여행 경로 지도", open=False, elem_id="map-accordion"
+                ) as map_accordion:
+                    map_html = gr.HTML(value=MAP_EMPTY_HTML)
 
             # ── 세션 / 저장 패널 ──────────────────────────────────
             with gr.Column(scale=1, min_width=220, elem_id="side-col"):
@@ -572,12 +783,37 @@ def build_ui() -> gr.Blocks:
         refresh_btn.click(on_refresh,
                           outputs=[current_session, chatbot, session_box, refresh_warning, refresh_btn])
 
-        for trigger in (msg_box.submit, send_btn.click):
-            trigger(handle_chat,
-                    inputs=[msg_box, chatbot, current_session],
-                    outputs=[msg_box, chatbot, session_box])
+        def show_map_loading(itinerary_data: dict):
+            """Streaming 완료 직후 지도 로딩 상태 표시."""
+            if not itinerary_data or not itinerary_data.get("text"):
+                return gr.update(), gr.update()
+            return MAP_LOADING_HTML, gr.update(open=True)
 
-        clear_btn.click(lambda: [], outputs=[chatbot])
+        for trigger in (msg_box.submit, send_btn.click):
+            chat_event = trigger(
+                handle_chat,
+                inputs=[msg_box, chatbot, current_session],
+                outputs=[msg_box, chatbot, session_box, last_itinerary],
+            )
+            # 스트리밍 완료 후 즉시 로딩 표시
+            chat_event.then(
+                show_map_loading,
+                inputs=[last_itinerary],
+                outputs=[map_html, map_accordion],
+            # 그 다음 실제 지오코딩 + 렌더링
+            ).then(
+                render_map,
+                inputs=[last_itinerary],
+                outputs=[map_html, map_accordion],
+            )
+
+        def on_clear():
+            return [], MAP_EMPTY_HTML, gr.update(open=False), {}
+
+        clear_btn.click(
+            on_clear,
+            outputs=[chatbot, map_html, map_accordion, last_itinerary],
+        )
 
         def on_save(history, session_id):
             status, filepath = export_chat_json(history, session_id)
