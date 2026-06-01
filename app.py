@@ -453,28 +453,31 @@ CSS = """
 #header p  { color: #6b7280; font-size: 1rem; margin: 6px 0 0; }
 #session-box textarea { font-family: monospace !important; font-size: 12px !important; }
 
-/* Hugging Face Spaces (iframe) 환경에서 좌우 레이아웃이 세로로 무너지는 현상 원천 방지 */
+/* [기본 상태: 모바일 및 좁은 화면] 세로 1열로 나열 */
 #main-row {
     display: flex !important;
-    flex-direction: row !important;
-    flex-wrap: nowrap !important; /* 강제로 줄바꿈을 금지하여 우측 패널이 아래로 떨어지지 않게 함 */
+    flex-direction: column !important;
     gap: 20px !important;
     width: 100% !important;
 }
-#chat-col {
-    flex: 3 1 0% !important; /* 좌측 채팅 영역은 가로폭에 따라 유연하게 늘어나고 줄어듦 */
-    min-width: 300px !important;
-}
-#side-col {
-    flex: 0 0 280px !important; /* 우측 패널은 280px 크기로 찌그러짐 없이 완전 고정 */
-    min-width: 280px !important;
+#chat-col, #side-col {
+    width: 100% !important;
+    flex: 1 1 auto !important;
 }
 
-/* Gradio 기본 반응형 미디어 쿼리가 flex-direction을 column으로 덮어쓰는 것을 방지 */
-@media (max-width: 768px) {
+/* [PC 및 태블릿 화면 - 너비 800px 이상] 좌우 2단 배치 적용 */
+@media (min-width: 800px) {
     #main-row {
         flex-direction: row !important;
-        flex-wrap: nowrap !important;
+        flex-wrap: nowrap !important; /* 창이 다소 줄어도 옆으로 떨어지지 않게 고정 */
+    }
+    #chat-col {
+        flex: 1 1 0% !important; /* 남는 가로 공간을 채팅창이 모두 채움 */
+        min-width: 450px !important; /* 채팅이 지나치게 좁아지지 않도록 제한 */
+    }
+    #side-col {
+        flex: 0 0 300px !important; /* 우측 세션 정보 패널은 300px로 크기 고정 */
+        min-width: 300px !important;
     }
 }
 """
