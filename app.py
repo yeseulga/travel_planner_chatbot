@@ -1,10 +1,12 @@
 import json
 import math
+import tempfile
 import threading
 import time
 import uuid
 import re
 import html as html_module
+from collections import defaultdict
 from urllib.parse import quote, unquote
 from datetime import datetime
 from pathlib import Path
@@ -196,7 +198,11 @@ def get_planner_prompt() -> ChatPromptTemplate:
 
 [작성 규칙]
 1. 구체적인 장소명 필수 — '쇼핑몰', '야시장' 같은 일반 명사 단독 사용 금지
-2. 모든 장소에 `[장소명](https://www.google.com/maps/search/{destination}+장소명)` 형식 링크 포함
+2. 모든 장소에 `[장소명](https://www.google.com/maps/search/{destination}+장소명): 설명` 형식으로 작성
+   - 반드시 링크 직후에 콜론(:)과 설명을 이어서 쓸 것
+   - 절대로 링크 뒤에 같은 이름을 평문으로 반복하지 말 것
+   - ❌ 잘못된 예: `[신주쿠 교엔](url)신주쿠 교엔: 설명`
+   - ✅ 올바른 예: `[신주쿠 교엔](url): 설명`
 3. 지리적 위치가 없는 항목(교통 패스, 티켓 등)에는 링크 달지 않기
 4. {destination} 외 다른 도시/국가의 장소 추천 금지
 
@@ -455,6 +461,7 @@ def build_folium_map(geocoded: list[dict]) -> str | None:
 
     m = folium.Map(location=[center_lat, center_lng], zoom_start=13)
 
+    # Day-colored markers
     for place in geocoded:
         color = DAY_COLORS[(place["day"] - 1) % len(DAY_COLORS)]
         folium.Marker(
@@ -466,9 +473,20 @@ def build_folium_map(geocoded: list[dict]) -> str | None:
             icon=folium.Icon(color=color, icon="map-marker"),
         ).add_to(m)
 
+    # Day-colored polylines (일차별 색상 경로)
     if len(geocoded) > 1:
-        coords = [[p["lat"], p["lng"]] for p in geocoded]
-        folium.PolyLine(coords, color="#6b7280", weight=2.5, opacity=0.8).add_to(m)
+        by_day: dict[int, list] = defaultdict(list)
+        for p in sorted(geocoded, key=lambda x: x["day"]):
+            by_day[p["day"]].append([p["lat"], p["lng"]])
+
+        for day_num in sorted(by_day.keys()):
+            coords = by_day[day_num]
+            if len(coords) > 1:
+                color = DAY_COLORS[(day_num - 1) % len(DAY_COLORS)]
+                folium.PolyLine(
+                    coords, color=color, weight=3, opacity=0.75,
+                    tooltip=f"{day_num}일차 경로",
+                ).add_to(m)
 
     return m._repr_html_()
 
@@ -484,10 +502,30 @@ def _budget_html(budget: str) -> str:
 
 
 def _build_map_html(geocoded: list[dict], total_places: int, budget: str) -> str:
-    """folium HTML + 경고 + 예산 요약을 합쳐서 반환."""
+    """folium HTML + 한국어 범례 + 경고 + 예산 요약을 합쳐서 반환."""
     folium_html = build_folium_map(geocoded)
     if not folium_html:
         return MAP_ERROR_HTML
+
+    # 일차별 색상 범례 (한국어)
+    COLOR_KO = {
+        "red": "#e53e3e", "blue": "#3182ce", "green": "#38a169",
+        "purple": "#805ad5", "orange": "#dd6b20", "darkred": "#9b2335",
+        "cadetblue": "#4a90a4",
+    }
+    days_present = sorted({p["day"] for p in geocoded})
+    legend_items = "".join(
+        f"<span style='margin-right:10px;white-space:nowrap;'>"
+        f"<span style='display:inline-block;width:10px;height:10px;"
+        f"border-radius:50%;background:{COLOR_KO[DAY_COLORS[(d-1)%len(DAY_COLORS)]]};margin-right:4px;'>"
+        f"</span>{d}일차</span>"
+        for d in days_present
+    )
+    legend = (
+        f"<div style='padding:6px 10px;font-size:12px;display:flex;flex-wrap:wrap;gap:4px;"
+        f"border-bottom:1px solid rgba(128,128,128,0.2);'>"
+        f"🗺️ 여행 경로 &nbsp; {legend_items}</div>"
+    ) if days_present else ""
 
     miss = total_places - len(geocoded)
     warning = ""
@@ -499,7 +537,8 @@ def _build_map_html(geocoded: list[dict], total_places: int, budget: str) -> str
 
     budget_part = _budget_html(budget) if budget.strip() else ""
     return (
-        warning
+        legend
+        + warning
         + f'<div style="height:360px;overflow:hidden;">{folium_html}</div>'
         + budget_part
     )
@@ -649,15 +688,29 @@ def export_chat_json(history: list, session_id: str) -> tuple[str, str | None]:
     if not history:
         return "저장할 대화 내역이 없습니다.", None
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = LOGS_DIR / f"{ts}_{session_id}.json"
     data = {
         "session_id": session_id,
         "saved_at": datetime.now().isoformat(),
         "messages": history,
         "timings": sessions.get(session_id, {}).get("timings", []),
     }
-    filepath.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    return f"✅ 저장 완료: {filepath}", str(filepath)
+    content = json.dumps(data, ensure_ascii=False, indent=2)
+
+    # 서버 로그용 저장
+    try:
+        (LOGS_DIR / f"{ts}_{session_id}.json").write_text(content, encoding="utf-8")
+    except Exception:
+        pass
+
+    # Gradio가 항상 서빙 가능한 temp 파일로 반환 (HF Spaces 호환)
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".json",
+        prefix=f"trip_{session_id}_",
+        delete=False, encoding="utf-8",
+    )
+    tmp.write(content)
+    tmp.close()
+    return "✅ 저장 완료! 아래 다운로드 버튼을 클릭하세요.", tmp.name
 
 
 # ============================================================
@@ -859,12 +912,6 @@ def build_ui() -> gr.Blocks:
             # ── 채팅 + 지도 ─────────────────────────────────────────
             with gr.Column(scale=3, elem_id="chat-col"):
 
-                # 지도: 채팅과 나란히, 항상 표시
-                map_html = gr.HTML(
-                    value=MAP_EMPTY_HTML,
-                    elem_id="map-panel",
-                )
-
                 chatbot = gr.Chatbot(label="대화", height=440)
                 with gr.Row():
                     msg_box = gr.Textbox(
@@ -873,6 +920,12 @@ def build_ui() -> gr.Blocks:
                     )
                     send_btn = gr.Button("전송 ➤", scale=1, variant="primary")
                 clear_btn = gr.Button("🗑️ 대화 초기화", variant="primary")
+
+                # 지도: 채팅창 아래에 표시
+                map_html = gr.HTML(
+                    value=MAP_EMPTY_HTML,
+                    elem_id="map-panel",
+                )
 
             # ── 세션 / 저장 패널 ──────────────────────────────────
             with gr.Column(scale=1, min_width=220, elem_id="side-col"):
