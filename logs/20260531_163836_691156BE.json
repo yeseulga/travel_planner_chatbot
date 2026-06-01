@@ -1,0 +1,50 @@
+{
+  "session_id": "691156BE",
+  "saved_at": "2026-05-31T16:38:36.937773",
+  "messages": [
+    {
+      "role": "user",
+      "metadata": null,
+      "content": [
+        {
+          "text": "홍콩",
+          "type": "text"
+        }
+      ],
+      "options": null
+    },
+    {
+      "role": "assistant",
+      "metadata": null,
+      "content": [
+        {
+          "text": "여행 기간은 어느 정도로 생각하고 계신가요? 😊",
+          "type": "text"
+        }
+      ],
+      "options": null
+    },
+    {
+      "role": "user",
+      "metadata": null,
+      "content": [
+        {
+          "text": "3박 4일",
+          "type": "text"
+        }
+      ],
+      "options": null
+    },
+    {
+      "role": "assistant",
+      "metadata": null,
+      "content": [
+        {
+          "text": "어디로 여행을 가고 싶으신지 알려주시면 계획을 짜드리겠습니다! 😊",
+          "type": "text"
+        }
+      ],
+      "options": null
+    }
+  ]
+}

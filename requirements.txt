@@ -1,0 +1,7 @@
+langchain-core
+langchain-openai
+langchain-community
+gradio>=5.0.0
+openai
+python-dotenv
+tavily-python

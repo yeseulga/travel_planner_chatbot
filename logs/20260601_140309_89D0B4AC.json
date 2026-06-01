@@ -1,0 +1,41 @@
+{
+  "session_id": "89D0B4AC",
+  "saved_at": "2026-06-01T14:03:09.246153",
+  "messages": [
+    {
+      "role": "user",
+      "metadata": null,
+      "content": [
+        {
+          "text": "홍콩 4박 5일",
+          "type": "text"
+        }
+      ],
+      "options": null
+    },
+    {
+      "role": "assistant",
+      "metadata": null,
+      "content": [
+        {
+          "text": "# 홍콩 4박 5일 여행 일정\n\n## 📅 Day 1: 도착 및 침사추이 탐방\n- **오전**\n  - 홍콩 국제공항 도착 후, [A21 공항버스](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+A21+%EA%B3%B5%ED%95%AD%EB%B2%84%EC%8A%A4) 탑승\n  - 숙소 체크인: 침사추이 지역의 [하버 그랜드 홍콩](https://www.google.com/maps/search/%ED%95%98%EB%B2%84+%EA%B7%B8%EB%9E%9C%EB%93%9C+%ED%99%8D%EC%BD%A9) (예상 가격: HK$1,500)\n  \n- **오후**\n  - 점심: [몽키 카페](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EB%AA%BD%ED%82%A4+%EC%B9%B4%ED%8E%98)에서 차찬탱 체험 (예상 비용: HK$70)\n  - [하버시티](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%ED%95%98%EB%B2%84%EC%8B%9C%ED%8B%B0) 쇼핑 (쇼핑 후 카페에서 커피 한 잔)\n  \n- **저녁**\n  - [침사추이 시계탑](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EC%B9%A8%EC%82%AC%EC%B6%94%EC%9D%B4+%EC%8B%9C%EA%B3%84%ED%83%91) 방문\n  - [심포니 오브 라이트](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EC%8B%AC%ED%8F%AC%EB%8B%88+%EC%98%A4%EB%B8%8C+%EB%9D%BC%EC%9D%B4%ED%8A%B8) 감상\n  - 저녁식사: [딤섬 전문점 팀호완](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%ED%8C%80%ED%98%B8%EC%99%84) (예상 비용: HK$100)\n\n## 📅 Day 2: 빅토리아 피크 & 센트럴 탐방\n- **오전**\n  - 아침식사: 호텔 또는 [차찬탱](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EC%B0%A8%EC%B0%AC%ED%83%B1)에서 밀크티와 홍콩 토스트\n  - [피크 트램](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%ED%94%BC%ED%81%AC+%ED%8A%B8%EB%9E%A8) 탑승하여 [빅토리아 피크](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EB%B9%85%ED%86%A0%EB%A6%AC%EC%95%84+%ED%94%BC%ED%81%AC) 전망대 방문 (예상 비용: HK$76)\n\n- **오후**\n  - 점심: [일락 (얏록)](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EC%9D%BC%EB%9D%BD)에서 로스트 구스 덮밥 (예상 비용: HK$80)\n  - [타이쿤](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%ED%83%80%EC%9D%B4%EC%BF%A4) 탐방 및 사진 촬영\n\n- **저녁**\n  - [스타 페리](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EC%8A%A4%ED%83%80+%ED%8E%98%EB%A6%AC) 탑승하여 야경 감상 후 센트럴 이동\n  - 저녁식사: [구기우남](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EA%B5%AC%EA%B8%B0%EC%9A%B0%EB%82%A8)에서 카레 쇠고기 쌀국수 (예상 비용: HK$70)\n\n## 📅 Day 3: 몽콕 탐방\n- **오전**\n  - 아침식사: [미도카페](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EB%AF%B8%EB%8F%84%EC%B9%B4%ED%8E%98)에서 완탕면 (예상 비용: HK$50)\n  - [레이디스 마켓](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EB%A0%88%EC%9D%B4%EB%94%94%EC%8A%A4+%EB%A7%88%EC%BC%93) 구경 및 쇼핑\n  \n- **오후**\n  - 점심: [굿 호프 누들](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EA%B5%BF+%ED%98%B8%ED%94%84+%EB%88%84%EB%93%A4)에서 국수 (예상 비용: HK$60)\n  - [몽콕 야시장](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EB%AA%BD%EC%BD%95+%EC%95%BC%EC%8B%9C%EC%9E%A5) 탐방\n\n- **저녁**\n  - 저녁식사: 몽콕의 유명한 [Tearapy](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+Tearapy)에서 디저트 (예상 비용: HK$50)\n\n## 📅 Day 4: 란타우섬 투어\n- **오전**\n  - 아침식사 후, [퉁청역](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%ED%89%81%EC%B2%AD%EC%97%AD)으로 이동\n  - [응핑 케이블카](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EC%9D%91%ED%95%91+%EC%BC%80%EC%9D%B4%EB%B8%94%EC%B9%B4) 탑승하여 [빅 부다](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EB%B9%85+%EB%B6%80%EB%8B%A4) 방문 (예상 비용: HK$195)\n\n- **오후**\n  - 점심: 타이오 어촌 마을의 [솔로카페](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EC%86%94%EB%A1%9C%EC%B9%B4%ED%8E%98)에서 간단한 식사 (예상 비용: HK$80)\n  - 타이오 마을 탐방 후, [타이오 야시장](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%ED%83%80%EC%9D%B4%EC%98%A4+%EC%95%BC%EC%8B%9C%EC%9E%A5) 방문\n\n- **저녁**\n  - 홍콩으로 돌아와 저녁식사: [베이크하우스](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EB%B2%A0%EC%9D%B4%ED%81%AC%ED%95%98%EC%9A%B0%EC%8A%A4)에서 저녁 (예상 비용: HK$90)\n\n## 📅 Day 5: 출국 준비 및 마지막 탐방\n- **오전**\n  - 호텔 체크아웃 후, [센트럴](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+%EC%84%BC%ED%8A%B8%EB%9F%B4) 지역 탐방\n  - [Cupping Room](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+Cupping+Room)에서 커피 및 브런치 (예상 비용: HK$80)\n\n- **오후**\n  - 마지막 쇼핑: [IFC몰](https://www.google.com/maps/search/%ED%99%8D%EC%BD%A9+IFC%EB%AA%B0)에서 기념품 구매\n  - 공항으로 이동 후 출국\n\n## 💰 예상 총 비용\n- 숙박 (4박): HK$6,000\n- 식사 (5일): HK$1,000\n- 교통비 (대중교통 및 케이블카): HK$500\n- 입장료 및 기타 비용: HK$1,000\n- **총 예상 비용: HK$8,500 (약 1,200,000원)**\n\n## 💡 여행 팁\n- **교통 패스**: 옥토퍼스 카드 구매 추천. 대중교통 및 식사 결제에 유용합니다.\n- **날씨**: 홍콩은 여름에 더운 날씨가 많으므로 가벼운 옷차림과 우산을 준비하세요.\n- **팁**: 관광지에서는 미리 티켓을 예약하면 대기 시간을 줄일 수 있습니다.\n\n여행을 즐기세요! 🌏✈️",
+          "type": "text"
+        }
+      ],
+      "options": null
+    }
+  ],
+  "timings": [
+    {
+      "turn": 1,
+      "user_input": "홍콩 4박 5일",
+      "timestamp": "2026-06-01T14:03:06.788263",
+      "router_ms": 1407,
+      "slot_ms": 1373,
+      "skeleton_ms": 2131,
+      "search_ms": 4213,
+      "planner_ms": 65786,
+      "total_ms": 75355
+    }
+  ]
+}

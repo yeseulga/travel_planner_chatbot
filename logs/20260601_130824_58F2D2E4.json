@@ -1,0 +1,69 @@
+{
+  "session_id": "58F2D2E4",
+  "saved_at": "2026-06-01T13:08:24.540349",
+  "messages": [
+    {
+      "role": "user",
+      "metadata": null,
+      "content": [
+        {
+          "text": "홍콩",
+          "type": "text"
+        }
+      ],
+      "options": null
+    },
+    {
+      "role": "assistant",
+      "metadata": null,
+      "content": [
+        {
+          "text": "이 챗봇은 여행 관련된 응답만 제공 가능합니다. 여행지와 기간을 알려주시면 계획을 짜드릴게요! ✈️",
+          "type": "text"
+        }
+      ],
+      "options": null
+    },
+    {
+      "role": "user",
+      "metadata": null,
+      "content": [
+        {
+          "text": "3박 4일",
+          "type": "text"
+        }
+      ],
+      "options": null
+    },
+    {
+      "role": "assistant",
+      "metadata": null,
+      "content": [
+        {
+          "text": "# 홍콩 3박 4일 여행 일정\n\n## 1일차: 홍콩 도착 및 탐방\n- **오전**\n  - 홍콩 국제공항 도착 후 [A21 공항버스](https://www.google.com/maps/search/A21+Airport+Bus) 이용하여 숙소로 이동.\n  - 숙소: **침사추이** 지역 추천 (편리한 접근성과 다양한 관광지 인근)\n  \n- **오후**\n  - 점심: [엘리펀트 그라운즈](https://www.google.com/maps/search/엘리펀트+그라운즈)에서 브런치 (수플레 팬케이크 추천)\n  - 관광: [빅토리아 피크](https://www.google.com/maps/search/빅토리아+피크) 방문 (피크 트램 이용 - HK$76)\n  \n- **저녁**\n  - 저녁식사: [하버 시티](https://www.google.com/maps/search/하버+시티) 내 레스토랑에서 홍콩식 해산물 요리\n  - 관광: 홍콩의 야경을 감상하며 [스타페리](https://www.google.com/maps/search/스타페리) 탑승 (HK$5)\n\n## 2일차: 문화 및 쇼핑 탐방\n- **오전**\n  - 아침식사: [카페 de Coral](https://www.google.com/maps/search/카페+de+Coral)에서 로컬 아침식사\n  - 관광: [홍콩 고궁 박물관](https://www.google.com/maps/search/홍콩+고궁+박물관) 탐방\n\n- **오후**\n  - 점심: [야우마테이 과일 시장](https://www.google.com/maps/search/야우마테이+과일+시장) 근처 로컬 식당\n  - 쇼핑: [몽콕](https://www.google.com/maps/search/몽콕) 지역의 유명 상점 및 시장 탐방 (레이저, 마이비, 등)\n\n- **저녁**\n  - 저녁식사: [타이청](https://www.google.com/maps/search/타이청)에서 로컬 딤섬\n  - 관광: [레인보우 스카이](https://www.google.com/maps/search/레인보우+스카이)에서 야경 감상\n\n## 3일차: 자연과 예술 탐방\n- **오전**\n  - 아침식사: 숙소 근처 카페에서 커피와 베이커리\n  - 관광: [서구룡 문화지구](https://www.google.com/maps/search/서구룡+문화지구) 방문 (M+ 미술관 포함)\n\n- **오후**\n  - 점심: [디즈니랜드](https://www.google.com/maps/search/디즈니랜드) 방문 (디즈니랜드를 원하지 않는다면 인근의 [태평양 센터](https://www.google.com/maps/search/태평양+센터) 방문)\n  - 시간이 남는다면, [타이탄 공원](https://www.google.com/maps/search/타이탄+공원)에서 여유롭게 산책\n\n- **저녁**\n  - 저녁식사: [시장 거리 음식](https://www.google.com/maps/search/시장+거리+음식)에서 현지 길거리 음식 체험\n  - 관광: [몽콕 야시장](https://www.google.com/maps/search/몽콕+야시장) 탐방\n\n## 4일차: 마지막 쇼핑 및 출국\n- **오전**\n  - 아침식사: [실크 센트럴 점](https://www.google.com/maps/search/실크+센트럴+점)에서 버블티와 간단한 아침\n  - 짐 정리 후 체크아웃\n  \n- **오후**\n  - 마지막 쇼핑: [침사추이](https://www.google.com/maps/search/침사추이) 지역의 쇼핑몰 방문\n  - 공항으로 이동: [A21 공항버스](https://www.google.com/maps/search/A21+Airport+Bus) 이용\n  \n- **저녁**\n  - 홍콩 국제공항 출발\n\n## 💰 예상 총 비용\n- 숙박비: 약 HK$3000 (3박 기준)\n- 식사비: 약 HK$1200 (1일 약 HK$400)\n- 교통비: 약 HK$500 (옥토퍼스 카드 포함)\n- 관광비: 약 HK$500 (피크 트램, 스타페리 등)\n- **총합계: 약 HK$6200 (한화 약 100만원)**\n\n## 💡 여행 팁\n- **날씨**: 홍콩은 겨울에도 따뜻하니 가벼운 옷차림을 추천합니다.\n- **교통 패스**: **옥토퍼스 카드**를 구매하여 대중교통 및 일부 상점에서 사용하면 편리합니다.\n- **주요 관광지**: 미리 예약이 필요한 곳도 있으니 사전에 확인하세요.\n\n즐거운 홍콩 여행 되세요!",
+          "type": "text"
+        }
+      ],
+      "options": null
+    }
+  ],
+  "timings": [
+    {
+      "turn": 1,
+      "user_input": "홍콩",
+      "timestamp": "2026-06-01T13:07:08.267431",
+      "router_ms": 1029,
+      "total_ms": 1031
+    },
+    {
+      "turn": 2,
+      "user_input": "3박 4일",
+      "timestamp": "2026-06-01T13:07:38.087955",
+      "router_ms": 560,
+      "slot_ms": 641,
+      "search_ms": 2638,
+      "planner_ms": 22862,
+      "total_ms": 26705
+    }
+  ]
+}

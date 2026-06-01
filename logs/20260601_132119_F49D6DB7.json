@@ -1,0 +1,69 @@
+{
+  "session_id": "F49D6DB7",
+  "saved_at": "2026-06-01T13:21:19.602833",
+  "messages": [
+    {
+      "role": "user",
+      "metadata": null,
+      "content": [
+        {
+          "text": "도쿜",
+          "type": "text"
+        }
+      ],
+      "options": null
+    },
+    {
+      "role": "assistant",
+      "metadata": null,
+      "content": [
+        {
+          "text": "이 챗봇은 여행 관련된 응답만 제공 가능합니다. 여행지와 기간을 알려주시면 계획을 짜드릴게요! ✈️",
+          "type": "text"
+        }
+      ],
+      "options": null
+    },
+    {
+      "role": "user",
+      "metadata": null,
+      "content": [
+        {
+          "text": "3박 4일",
+          "type": "text"
+        }
+      ],
+      "options": null
+    },
+    {
+      "role": "assistant",
+      "metadata": null,
+      "content": [
+        {
+          "text": "# 도쿄 3박 4일 여행 일정\n\n## 📅 1일차: 시부야 & 하라주쿠 탐방\n- **오전**\n  - **시부야 스크램블 교차로** 방문: 도쿄의 상징적인 명소에서 다양한 사람들의 흐름을 감상하세요. [시부야 스크램블 교차로](https://www.google.com/maps/search/시부야+스크램블+교차로)\n  \n- **점심**\n  - **모모타로**에서 일본식 덮밥 정식으로 점심: [모모타로](https://www.google.com/maps/search/모모타로)\n\n- **오후**\n  - **하라주쿠의 다케시타 거리** 탐방: 유니크한 패션 아이템과 기념품을 쇼핑하세요. [다케시타 거리](https://www.google.com/maps/search/다케시타+거리)\n  - **오모테산도**에서 고급 브랜드 쇼핑: [오모테산도](https://www.google.com/maps/search/오모테산도)\n\n- **저녁**\n  - **이자카야**에서 일본 전통 안주와 함께 저녁: **이자카야 다이닝 연** [이자카야 다이닝 연](https://www.google.com/maps/search/이자카야+다이닝+연)\n\n- **숙박**\n  - **도큐 스테이 신미나미구치** (가성비 좋은 호텔, 시부야 근처) [도큐 스테이 신미나미구치](https://www.google.com/maps/search/도큐+스테이+신미나미구치)\n\n---\n\n## 📅 2일차: 아사쿠사 & 우에노 관광\n- **오전**\n  - **센소지 사원** 방문: 도쿄에서 가장 유명한 사원 중 하나인 센소지를 탐방하세요. [센소지](https://www.google.com/maps/search/센소지)\n  \n- **점심**\n  - **우에노 아메요코 시장**에서 다양한 길거리 음식을 맛보세요: [아메요코 시장](https://www.google.com/maps/search/아메요코+시장)\n\n- **오후**\n  - **우에노 온시 공원**에서 산책: 자연과 문화가 어우러진 공원에서 여유를 즐기세요. [우에노 온시 공원](https://www.google.com/maps/search/우에노+온시+공원)\n  - **에도 도쿄 다테모노엔** 방문: 일본의 전통 건축물을 감상하세요. [에도 도쿄 다테모노엔](https://www.google.com/maps/search/에도+도쿄+다테모노엔)\n\n- **저녁**\n  - **카츠야**에서 돈카츠로 저녁: [카츠야](https://www.google.com/maps/search/카츠야)\n\n- **숙박**\n  - **도큐 스테이 신미나미구치** (변경 없음)\n\n---\n\n## 📅 3일차: 롯폰기 & 도쿄 타워\n- **오전**\n  - **롯폰기 힐즈** 전망대 방문: 도쿄의 멋진 전경을 감상하세요. [롯폰기 힐즈](https://www.google.com/maps/search/롯폰기+힐즈)\n\n- **점심**\n  - **카페 드 파리**에서 브런치: [카페 드 파리](https://www.google.com/maps/search/카페+드+파리)\n\n- **오후**\n  - **도쿄 타워** 방문: 도쿄의 아이콘인 도쿄 타워에서 야경을 즐기세요. [도쿄 타워](https://www.google.com/maps/search/도쿄+타워)\n\n- **저녁**\n  - **사무라이 레스토랑**에서 일본 전통 요리 저녁: [사무라이 레스토랑](https://www.google.com/maps/search/사무라이+레스토랑)\n\n- **숙박**\n  - **도큐 스테이 신미나미구치** (변경 없음)\n\n---\n\n## 📅 4일차: 쇼핑 & 출국 준비\n- **오전**\n  - **신주쿠**의 **다카시마야** 백화점 방문: 다양한 브랜드 쇼핑을 즐기세요. [다카시마야](https://www.google.com/maps/search/다카시마야)\n\n- **점심**\n  - **킨조**에서 우동으로 점심: [킨조](https://www.google.com/maps/search/킨조)\n\n- **오후**\n  - 마지막 쇼핑 및 기념품 구매 후 공항으로 이동.\n\n## 🚌 이동 방법\n- 도쿄 내 이동은 **JR 도쿠나이 패스**를 이용하면 편리합니다. [JR 도쿠나이 패스](https://www.google.com/maps/search/JR+도쿠나이+패스)\n\n## 💰 예상 총 비용\n- 숙박: 약 45,000엔 (3박)\n- 식비: 약 15,000엔\n- 교통비: 약 5,000엔\n- 관광지 입장료: 약 5,000엔\n- **총 예상 비용: 약 70,000엔** (약 700,000원)\n\n## 💡 여행 팁\n- **날씨:** 도쿄의 날씨는 계절에 따라 다르므로, 여행 전에 날씨를 체크하세요.\n- **교통 패스:** JR 도쿠나이 패스를 미리 구매하면 도쿄 내 이동이 편리합니다.\n- **언어:** 영어가 통하지 않는 곳도 있으니, 기본적인 일본어 표현을 익혀두면 좋습니다.\n\n안전하고 즐거운 여행 되세요!",
+          "type": "text"
+        }
+      ],
+      "options": null
+    }
+  ],
+  "timings": [
+    {
+      "turn": 1,
+      "user_input": "도쿜",
+      "timestamp": "2026-06-01T13:19:24.317692",
+      "router_ms": 1962,
+      "total_ms": 1964
+    },
+    {
+      "turn": 2,
+      "user_input": "3박 4일",
+      "timestamp": "2026-06-01T13:19:57.207159",
+      "router_ms": 840,
+      "slot_ms": 921,
+      "search_ms": 3287,
+      "planner_ms": 18843,
+      "total_ms": 23894
+    }
+  ]
+}
