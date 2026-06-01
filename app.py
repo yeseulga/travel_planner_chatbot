@@ -453,21 +453,29 @@ CSS = """
 #header p  { color: #6b7280; font-size: 1rem; margin: 6px 0 0; }
 #session-box textarea { font-family: monospace !important; font-size: 12px !important; }
 
-/* Hugging Face Spaces (iframe) 환경에서 좌우 레이아웃이 세로로 무너지는 현상 방지 */
+/* Hugging Face Spaces (iframe) 환경에서 좌우 레이아웃이 세로로 무너지는 현상 원천 방지 */
 #main-row {
     display: flex !important;
     flex-direction: row !important;
-    flex-wrap: wrap !important;
+    flex-wrap: nowrap !important; /* 강제로 줄바꿈을 금지하여 우측 패널이 아래로 떨어지지 않게 함 */
     gap: 20px !important;
     width: 100% !important;
 }
 #chat-col {
-    flex: 3 1 500px !important;
-    min-width: 320px !important;
+    flex: 3 1 0% !important; /* 좌측 채팅 영역은 가로폭에 따라 유연하게 늘어나고 줄어듦 */
+    min-width: 300px !important;
 }
 #side-col {
-    flex: 1 1 260px !important;
-    min-width: 250px !important;
+    flex: 0 0 280px !important; /* 우측 패널은 280px 크기로 찌그러짐 없이 완전 고정 */
+    min-width: 280px !important;
+}
+
+/* Gradio 기본 반응형 미디어 쿼리가 flex-direction을 column으로 덮어쓰는 것을 방지 */
+@media (max-width: 768px) {
+    #main-row {
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+    }
 }
 """
 
