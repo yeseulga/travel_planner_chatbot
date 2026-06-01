@@ -44,9 +44,8 @@ CHITCHAT_RESPONSE = (
     "여행지와 기간을 알려주시면 계획을 짜드릴게요! ✈️"
 )
 
-# Naver Local Search API credentials (for fast parallel geocoding)
-NAVER_CLIENT_ID = "qvudkZZbsAuDE5sIUvd6"
-NAVER_CLIENT_SECRET = "euWL5tbdpc"
+# Google Maps API key
+GOOGLE_MAPS_API_KEY = "AIzaSyBRZQQheoHm9D_4yDvSrJPxlDaaAMrfhgw"
 
 # Day-color palette for map markers and polylines
 DAY_COLORS = ["#e53e3e", "#3182ce", "#38a169", "#805ad5", "#dd6b20", "#9b2335", "#4a90a4"]
@@ -354,29 +353,22 @@ def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def _naver_search_geocode(place: "PlaceForMap", dest: str) -> tuple[float, float] | None:
-    """Naver Local Search API로 좌표 조회 (빠름, 병렬 가능)."""
-    try:
-        import requests
-        # 한국어 장소명 + 여행지로 검색 (Naver는 한국어에 강점)
-        query = f"{place.name} {dest}"
-        resp = requests.get(
-            "https://openapi.naver.com/v1/search/local.json",
-            params={"query": query, "display": 1},
-            headers={
-                "X-Naver-Client-Id": NAVER_CLIENT_ID,
-                "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
-            },
-            timeout=5,
-        )
-        items = resp.json().get("items", [])
-        if items:
-            # Naver returns coordinates × 1e7 as integers
-            lng = int(items[0]["mapx"]) / 1e7
-            lat = int(items[0]["mapy"]) / 1e7
-            return lat, lng
-    except Exception:
-        pass
+def _google_geocode(place: "PlaceForMap", dest: str) -> tuple[float, float] | None:
+    """Google Places Text Search API로 좌표 조회 (빠름, 글로벌, 병렬 가능)."""
+    import requests
+    for query in (f"{place.name} {dest}", f"{place.english_name} {dest}"):
+        try:
+            resp = requests.get(
+                "https://maps.googleapis.com/maps/api/place/textsearch/json",
+                params={"query": query, "key": GOOGLE_MAPS_API_KEY, "language": "ko"},
+                timeout=5,
+            )
+            data = resp.json()
+            if data.get("status") == "OK" and data.get("results"):
+                loc = data["results"][0]["geometry"]["location"]
+                return loc["lat"], loc["lng"]
+        except Exception:
+            pass
     return None
 
 
@@ -415,8 +407,8 @@ def _nominatim_geocode(
 
 def geocode_places(places: list[PlaceForMap], dest: str) -> list[dict]:
     """
-    Stage 1: Naver Local Search API로 전체 병렬 조회 (빠름)
-    Stage 2: 실패한 장소만 Nominatim fallback (1.1s 간격 준수)
+    Stage 1: Google Geocoding API 병렬 조회 (빠름, 글로벌)
+    Stage 2: 실패한 장소만 Nominatim fallback
     """
     t0 = time.time()
     info = DEST_EN_MAP.get(dest)
@@ -427,10 +419,10 @@ def geocode_places(places: list[PlaceForMap], dest: str) -> list[dict]:
     max_radius = info[4] if info else 300
 
     result: list[dict] = []
-    naver_failed: list[PlaceForMap] = []
+    google_failed: list[PlaceForMap] = []
 
-    def _try_naver(place: PlaceForMap) -> tuple[PlaceForMap, float | None, float | None]:
-        coords = _naver_search_geocode(place, dest)
+    def _try_google(place: PlaceForMap) -> tuple[PlaceForMap, float | None, float | None]:
+        coords = _google_geocode(place, dest)
         if coords:
             lat, lng = coords
             if center_lat is not None and _haversine_km(center_lat, center_lng, lat, lng) > max_radius:
@@ -438,9 +430,9 @@ def geocode_places(places: list[PlaceForMap], dest: str) -> list[dict]:
             return place, lat, lng
         return place, None, None
 
-    # Stage 1 — 병렬 Naver 검색 (rate limit 없음)
+    # Stage 1 — 병렬 Google 지오코딩 (rate limit 없음)
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
-        for place, lat, lng in ex.map(_try_naver, places[:10]):
+        for place, lat, lng in ex.map(_try_google, places[:10]):
             if lat is not None:
                 result.append({
                     "name":     html_module.escape(place.name),
@@ -451,12 +443,12 @@ def geocode_places(places: list[PlaceForMap], dest: str) -> list[dict]:
                     "lng":      lng,
                 })
             else:
-                naver_failed.append(place)
+                google_failed.append(place)
 
-    print(f"[geocode] Naver: {len(result)} found, {len(naver_failed)} failed ({time.time()-t0:.1f}s)")
+    print(f"[geocode] Google: {len(result)} found, {len(google_failed)} failed ({time.time()-t0:.1f}s)")
 
-    # Stage 2 — Nominatim fallback (1.1s 간격 순차)
-    for place in naver_failed:
+    # Stage 2 — Nominatim fallback
+    for place in google_failed:
         coords = _nominatim_geocode(place, dest_en, dest_country, center_lat, center_lng, max_radius)
         if coords:
             result.append({
@@ -513,66 +505,73 @@ def extract_itinerary_analysis(itinerary_text: str, dest: str) -> ItineraryAnaly
 # ============================================================
 # Map Building
 # ============================================================
-def build_folium_map(geocoded: list[dict]) -> str | None:
+def build_google_map(geocoded: list[dict]) -> str | None:
+    """Google Maps JS API로 번호 마커 + 점선 경로 지도 생성 (srcdoc iframe)."""
     if not geocoded:
-        return None
-    try:
-        import folium
-    except ImportError:
         return None
 
     center_lat = sum(p["lat"] for p in geocoded) / len(geocoded)
     center_lng = sum(p["lng"] for p in geocoded) / len(geocoded)
 
-    m = folium.Map(location=[center_lat, center_lng], zoom_start=13,
-                   tiles="CartoDB Positron")  # 깔끔한 배경
-
-    # 일차별 그룹화 + 순서 번호 부여
     by_day: dict[int, list] = defaultdict(list)
     for p in sorted(geocoded, key=lambda x: x["day"]):
         by_day[p["day"]].append(p)
 
+    # JS 코드 생성 (마커 + 점선 경로)
+    js_parts: list[str] = []
     for day_num in sorted(by_day.keys()):
         places = by_day[day_num]
         color = DAY_COLORS[(day_num - 1) % len(DAY_COLORS)]
 
-        # 번호가 있는 원형 마커 (day 내 순서: 1부터 시작)
-        for order, place in enumerate(places, start=1):
-            lat, lng = place["lat"], place["lng"]
-            name = place["name"]
-            icon_html = (
-                f'<div style="'
-                f'background:{color};color:#fff;border-radius:50%;'
-                f'width:30px;height:30px;line-height:30px;text-align:center;'
-                f'font-weight:700;font-size:14px;'
-                f'border:2.5px solid #fff;'
-                f'box-shadow:0 2px 6px rgba(0,0,0,0.35);'
-                f'">{order}</div>'
+        for order, p in enumerate(places, 1):
+            safe_name = p["name"].replace("\\", "\\\\").replace("'", "\\'")
+            js_parts.append(
+                f"new google.maps.Marker({{"
+                f"position:{{lat:{p['lat']},lng:{p['lng']}}},"
+                f"map:m,"
+                f"label:{{text:'{order}',color:'#fff',fontWeight:'700',fontSize:'13px'}},"
+                f"icon:{{path:google.maps.SymbolPath.CIRCLE,scale:14,"
+                f"fillColor:'{color}',fillOpacity:1,strokeColor:'#fff',strokeWeight:2.5}},"
+                f"title:'{safe_name} ({day_num}일차 {order}번)'"
+                f"}});"
             )
-            folium.Marker(
-                location=[lat, lng],
-                popup=folium.Popup(f"{name} ({day_num}일차 {order}번)", max_width=200),
-                tooltip=f"{day_num}일차 {order}번 | {name}",
-                icon=folium.DivIcon(
-                    html=icon_html,
-                    icon_size=(30, 30),
-                    icon_anchor=(15, 15),
-                ),
-            ).add_to(m)
 
-        # 일차 내 점선 경로
         if len(places) > 1:
-            coords = [[p["lat"], p["lng"]] for p in places]
-            folium.PolyLine(
-                coords,
-                color=color,
-                weight=2.5,
-                opacity=0.85,
-                dash_array="8 5",
-                tooltip=f"{day_num}일차 경로",
-            ).add_to(m)
+            path = ",".join(f"{{lat:{p['lat']},lng:{p['lng']}}}" for p in places)
+            js_parts.append(
+                f"new google.maps.Polyline({{"
+                f"path:[{path}],geodesic:false,strokeOpacity:0,"
+                f"icons:[{{icon:{{path:'M 0,-1 0,1',"
+                f"strokeOpacity:0.9,strokeColor:'{color}',scale:3}},"
+                f"offset:'0',repeat:'12px'}}],map:m"
+                f"}});"
+            )
 
-    return m._repr_html_()
+    js_code = "\n".join(js_parts)
+
+    inner_html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:sans-serif}}#map{{width:100%;height:100vh}}</style>
+</head><body><div id="map"></div>
+<script>
+function initMap(){{
+  var m=new google.maps.Map(document.getElementById('map'),{{
+    center:{{lat:{center_lat},lng:{center_lng}}},
+    zoom:13,language:'ko',
+    mapTypeControl:false,streetViewControl:false,fullscreenControl:false
+  }});
+  {js_code}
+}}
+</script>
+<script src="https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&language=ko&callback=initMap" async defer></script>
+</body></html>"""
+
+    escaped = html_module.escape(inner_html, quote=True)
+    return (
+        f'<iframe srcdoc="{escaped}" '
+        f'style="width:100%;height:360px;border:none;border-radius:8px;" '
+        f'sandbox="allow-scripts allow-same-origin allow-popups"></iframe>'
+    )
 
 
 def _budget_html(budget: str) -> str:
@@ -586,8 +585,8 @@ def _budget_html(budget: str) -> str:
 
 
 def _build_map_html(geocoded: list[dict], total_places: int, budget: str) -> str:
-    """folium HTML + 한국어 범례 + 경고 + 예산 요약을 합쳐서 반환."""
-    folium_html = build_folium_map(geocoded)
+    """Google Maps iframe + 한국어 범례 + 경고 + 예산 요약을 합쳐서 반환."""
+    folium_html = build_google_map(geocoded)
     if not folium_html:
         return MAP_ERROR_HTML
 
@@ -615,12 +614,7 @@ def _build_map_html(geocoded: list[dict], total_places: int, budget: str) -> str
         )
 
     budget_part = _budget_html(budget) if budget.strip() else ""
-    return (
-        legend
-        + warning
-        + f'<div style="height:360px;overflow:hidden;">{folium_html}</div>'
-        + budget_part
-    )
+    return legend + warning + folium_html + budget_part
 
 
 # ============================================================
