@@ -50,6 +50,39 @@ GOOGLE_MAPS_API_KEY = "AIzaSyBRZQQheoHm9D_4yDvSrJPxlDaaAMrfhgw"
 # Day-color palette for map markers and polylines
 DAY_COLORS = ["#e53e3e", "#3182ce", "#38a169", "#805ad5", "#dd6b20", "#9b2335", "#4a90a4"]
 
+# 목적지별 주요 공항 (airport_name, lat, lng)
+DEST_AIRPORTS: dict[str, tuple] = {
+    "도쿄":       ("하네다 공항 (HND)",            35.5494,  139.7798),
+    "오사카":     ("간사이 국제공항 (KIX)",          34.4343,  135.2441),
+    "교토":       ("간사이 국제공항 (KIX)",          34.4343,  135.2441),
+    "후쿠오카":   ("후쿠오카 공항 (FUK)",            33.5855,  130.4510),
+    "삿포로":     ("신치토세 공항 (CTS)",            42.7752,  141.6921),
+    "오키나와":   ("나하 공항 (OKA)",               26.1958,  127.6460),
+    "홍콩":       ("홍콩 국제공항 (HKG)",            22.3080,  113.9185),
+    "마카오":     ("마카오 국제공항 (MFM)",           22.1496,  113.5916),
+    "방콕":       ("수완나품 공항 (BKK)",            13.6900,  100.7501),
+    "다낭":       ("다낭 국제공항 (DAD)",            16.0439,  108.1993),
+    "하노이":     ("노이바이 국제공항 (HAN)",         21.2212,  105.8071),
+    "호치민":     ("탄손낫 국제공항 (SGN)",          10.8188,  106.6520),
+    "싱가포르":   ("창이 공항 (SIN)",                1.3644,  103.9915),
+    "타이베이":   ("타오위안 국제공항 (TPE)",         25.0776,  121.2328),
+    "타이페이":   ("타오위안 국제공항 (TPE)",         25.0776,  121.2328),
+    "파리":       ("샤를 드 골 공항 (CDG)",          49.0097,    2.5479),
+    "런던":       ("히스로 공항 (LHR)",             51.4775,   -0.4614),
+    "뉴욕":       ("JFK 국제공항 (JFK)",            40.6413,  -73.7781),
+    "LA":         ("LA 국제공항 (LAX)",             33.9425, -118.4081),
+    "로스앤젤레스":("LA 국제공항 (LAX)",             33.9425, -118.4081),
+    "시드니":     ("시드니 공항 (SYD)",             -33.9399,  151.1753),
+    "멜버른":     ("멜버른 공항 (MEL)",             -37.6690,  144.8410),
+    "바르셀로나": ("바르셀로나 공항 (BCN)",           41.2974,    2.0833),
+    "로마":       ("피우미치노 공항 (FCO)",           41.7999,   12.2462),
+    "제주":       ("제주국제공항 (CJU)",             33.5113,  126.4928),
+    "부산":       ("김해국제공항 (PUS)",             35.1795,  128.9382),
+    "경주":       ("김해국제공항 (PUS)",             35.1795,  128.9382),
+    "발리":       ("응우라라이 공항 (DPS)",           -8.7467,  115.1670),
+    "쿠알라룸푸르":("KLIA 공항 (KUL)",               2.7456,  101.7099),
+}
+
 MAP_EMPTY_HTML = (
     "<div style='height:300px;display:flex;align-items:center;"
     "justify-content:center;color:#9ca3af;font-size:14px;'>"
@@ -505,20 +538,53 @@ def extract_itinerary_analysis(itinerary_text: str, dest: str) -> ItineraryAnaly
 # ============================================================
 # Map Building
 # ============================================================
-def build_google_map(geocoded: list[dict]) -> str | None:
-    """Google Maps JS API로 번호 마커 + 점선 경로 지도 생성 (srcdoc iframe)."""
+def build_google_map(geocoded: list[dict], dest: str = "") -> str | None:
+    """Google Maps JS API — 직접 DOM 주입 방식 (srcdoc iframe 없음).
+    srcdoc의 null-origin 문제를 피하기 위해 gr.HTML에 script 태그를 직접 삽입.
+    """
     if not geocoded:
         return None
 
     center_lat = sum(p["lat"] for p in geocoded) / len(geocoded)
     center_lng = sum(p["lng"] for p in geocoded) / len(geocoded)
 
+    # 유니크 ID로 동일 페이지 내 다중 인스턴스 충돌 방지
+    uid = uuid.uuid4().hex[:8]
+    map_div = f"gmap_{uid}"
+    init_fn = f"gmapInit_{uid}"
+
     by_day: dict[int, list] = defaultdict(list)
     for p in sorted(geocoded, key=lambda x: x["day"]):
         by_day[p["day"]].append(p)
 
-    # JS 코드 생성 (마커 + 점선 경로)
     js_parts: list[str] = []
+
+    # 공항 마커 (특별 핀 스타일)
+    if dest and dest in DEST_AIRPORTS:
+        ap_name, ap_lat, ap_lng = DEST_AIRPORTS[dest]
+        ap_safe = ap_name.replace("'", "\\'")
+        # SVG 핀 모양 아이콘 (파란색 테두리, 비행기 이모지)
+        ap_svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="50" viewBox="0 0 40 50">'
+            '<path d="M20 0 C8.95 0 0 8.95 0 20 C0 33 20 50 20 50 C20 50 40 33 40 20 C40 8.95 31.05 0 20 0Z"'
+            ' fill="#5ba3dc" stroke="#2d6ea8" stroke-width="2.5"/>'
+            '<circle cx="20" cy="20" r="12" fill="white" stroke="#2d6ea8" stroke-width="1.5"/>'
+            '<text x="20" y="26" text-anchor="middle" fill="#2d6ea8"'
+            ' font-size="16" font-family="sans-serif">&#x2708;</text>'
+            '</svg>'
+        )
+        ap_icon_url = f"data:image/svg+xml;charset=UTF-8,{quote(ap_svg)}"
+        js_parts.append(
+            f"new google.maps.Marker({{"
+            f"position:{{lat:{ap_lat},lng:{ap_lng}}},"
+            f"map:m,"
+            f"icon:{{url:'{ap_icon_url}',scaledSize:new google.maps.Size(40,50),"
+            f"anchor:new google.maps.Point(20,50)}},"
+            f"title:'{ap_safe}',zIndex:100"
+            f"}});"
+        )
+
+    # 일차별 번호 마커 + 점선 경로
     for day_num in sorted(by_day.keys()):
         places = by_day[day_num]
         color = DAY_COLORS[(day_num - 1) % len(DAY_COLORS)]
@@ -549,29 +615,32 @@ def build_google_map(geocoded: list[dict]) -> str | None:
 
     js_code = "\n".join(js_parts)
 
-    inner_html = f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8">
-<style>*{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:sans-serif}}#map{{width:100%;height:100vh}}</style>
-</head><body><div id="map"></div>
+    # 직접 DOM 주입 — google.maps 이미 로드 시 재사용, 미로드 시 script 동적 삽입
+    return f"""<div id="{map_div}" style="width:100%;height:360px;border-radius:8px;"></div>
 <script>
-function initMap(){{
-  var m=new google.maps.Map(document.getElementById('map'),{{
-    center:{{lat:{center_lat},lng:{center_lng}}},
-    zoom:13,language:'ko',
-    mapTypeControl:false,streetViewControl:false,fullscreenControl:false
-  }});
-  {js_code}
-}}
-</script>
-<script src="https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&language=ko&callback=initMap" async defer></script>
-</body></html>"""
-
-    escaped = html_module.escape(inner_html, quote=True)
-    return (
-        f'<iframe srcdoc="{escaped}" '
-        f'style="width:100%;height:360px;border:none;border-radius:8px;" '
-        f'sandbox="allow-scripts allow-same-origin allow-popups"></iframe>'
-    )
+(function(){{
+  function {init_fn}(){{
+    var el=document.getElementById('{map_div}');
+    if(!el)return;
+    var m=new google.maps.Map(el,{{
+      center:{{lat:{center_lat},lng:{center_lng}}},
+      zoom:13,mapTypeControl:false,streetViewControl:false,fullscreenControl:false
+    }});
+    {js_code}
+  }}
+  if(typeof google!=='undefined'&&google.maps){{
+    {init_fn}();
+  }}else{{
+    window['{init_fn}']=function(){{{init_fn}();}};
+    if(!document.querySelector('script[data-gmaps-key]')){{
+      var s=document.createElement('script');
+      s.setAttribute('data-gmaps-key','1');
+      s.src='https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&language=ko&callback={init_fn}';
+      document.head.appendChild(s);
+    }}
+  }}
+}})();
+</script>"""
 
 
 def _budget_html(budget: str) -> str:
@@ -584,9 +653,9 @@ def _budget_html(budget: str) -> str:
     )
 
 
-def _build_map_html(geocoded: list[dict], total_places: int, budget: str) -> str:
-    """Google Maps iframe + 한국어 범례 + 경고 + 예산 요약을 합쳐서 반환."""
-    folium_html = build_google_map(geocoded)
+def _build_map_html(geocoded: list[dict], total_places: int, budget: str, dest: str = "") -> str:
+    """Google Maps + 한국어 범례 + 경고 + 예산 요약을 합쳐서 반환."""
+    folium_html = build_google_map(geocoded, dest)
     if not folium_html:
         return MAP_ERROR_HTML
 
@@ -775,15 +844,12 @@ def export_chat_json(history: list, session_id: str) -> tuple[str, str | None]:
     except Exception:
         pass
 
-    # Gradio가 항상 서빙 가능한 temp 파일로 반환 (HF Spaces 호환)
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".json",
-        prefix=f"trip_{session_id}_",
-        delete=False, encoding="utf-8",
-    )
-    tmp.write(content)
-    tmp.close()
-    return "✅ 저장 완료! 아래 다운로드 버튼을 클릭하세요.", tmp.name
+    # trip_날짜_세션ID.json 형식의 temp 파일 (Gradio 서빙 가능)
+    date_str = datetime.now().strftime("%Y%m%d")
+    filename = f"trip_{date_str}_{session_id}.json"
+    tmp_path = Path(tempfile.gettempdir()) / filename
+    tmp_path.write_text(content, encoding="utf-8")
+    return "✅ 저장 완료! 아래 다운로드 버튼을 클릭하세요.", str(tmp_path)
 
 
 # ============================================================
@@ -892,6 +958,7 @@ def handle_chat(user_input: str, history: list, session_id: str):
                 final_geocoded,
                 len(analysis.places),
                 analysis.budget_summary,
+                dest or "",
             )
 
     except Exception as e:
