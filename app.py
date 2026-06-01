@@ -1,3 +1,4 @@
+import concurrent.futures
 import json
 import math
 import tempfile
@@ -43,8 +44,12 @@ CHITCHAT_RESPONSE = (
     "여행지와 기간을 알려주시면 계획을 짜드릴게요! ✈️"
 )
 
-# Day-color palette for map markers (wraps after 7 days)
-DAY_COLORS = ["red", "blue", "green", "purple", "orange", "darkred", "cadetblue"]
+# Naver Local Search API credentials (for fast parallel geocoding)
+NAVER_CLIENT_ID = "qvudkZZbsAuDE5sIUvd6"
+NAVER_CLIENT_SECRET = "euWL5tbdpc"
+
+# Day-color palette for map markers and polylines
+DAY_COLORS = ["#e53e3e", "#3182ce", "#38a169", "#805ad5", "#dd6b20", "#9b2335", "#4a90a4"]
 
 MAP_EMPTY_HTML = (
     "<div style='height:300px;display:flex;align-items:center;"
@@ -349,61 +354,121 @@ def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def geocode_places(places: list[PlaceForMap], dest: str) -> list[dict]:
-    """Nominatim 지오코딩 + 도시 중심 거리 검증."""
+def _naver_search_geocode(place: "PlaceForMap", dest: str) -> tuple[float, float] | None:
+    """Naver Local Search API로 좌표 조회 (빠름, 병렬 가능)."""
+    try:
+        import requests
+        # 한국어 장소명 + 여행지로 검색 (Naver는 한국어에 강점)
+        query = f"{place.name} {dest}"
+        resp = requests.get(
+            "https://openapi.naver.com/v1/search/local.json",
+            params={"query": query, "display": 1},
+            headers={
+                "X-Naver-Client-Id": NAVER_CLIENT_ID,
+                "X-Naver-Client-Secret": NAVER_CLIENT_SECRET,
+            },
+            timeout=5,
+        )
+        items = resp.json().get("items", [])
+        if items:
+            # Naver returns coordinates × 1e7 as integers
+            lng = int(items[0]["mapx"]) / 1e7
+            lat = int(items[0]["mapy"]) / 1e7
+            return lat, lng
+    except Exception:
+        pass
+    return None
+
+
+def _nominatim_geocode(
+    place: "PlaceForMap",
+    dest_en: str,
+    dest_country: str,
+    center_lat: float | None,
+    center_lng: float | None,
+    max_radius: float,
+) -> tuple[float, float] | None:
+    """Nominatim 지오코딩 (느리지만 글로벌 커버리지)."""
     try:
         from geopy.geocoders import Nominatim
-    except ImportError:
-        return []
-
-    info = DEST_EN_MAP.get(dest)
-    dest_en = info[0] if info else None
-    dest_country = info[1] if info else None
-    center_lat = info[2] if info else None
-    center_lng = info[3] if info else None
-    max_radius = info[4] if info else 300
-
-    geolocator = Nominatim(user_agent="trip_planner_hf_v3", timeout=5)
-    result: list[dict] = []
-
-    for place in places[:10]:
-        # 쿼리 우선순위: "장소명, 도시, 국가" → "장소명, 도시" → "장소명"
+        geolocator = Nominatim(user_agent="trip_planner_hf_v4", timeout=5)
         queries = []
         if dest_en and dest_country:
             queries.append(f"{place.english_name}, {dest_en}, {dest_country}")
         if dest_en:
             queries.append(f"{place.english_name}, {dest_en}")
         queries.append(place.english_name)
-
-        location = None
-        for query in queries:
-            try:
-                location = geolocator.geocode(query)
-                time.sleep(1.1)  # Nominatim rate limit: 1 req/s
-                if location and center_lat is not None:
-                    dist = _haversine_km(
-                        center_lat, center_lng,
-                        location.latitude, location.longitude,
-                    )
+        for q in queries:
+            loc = geolocator.geocode(q)
+            time.sleep(1.1)
+            if loc:
+                if center_lat is not None:
+                    dist = _haversine_km(center_lat, center_lng, loc.latitude, loc.longitude)
                     if dist > max_radius:
-                        location = None
-                        continue  # 다른 쿼리로 재시도
-                if location:
-                    break  # 유효한 좌표 확보
-            except Exception:
-                time.sleep(1.1)
-                continue
+                        loc = None
+                        continue
+                return loc.latitude, loc.longitude
+    except Exception:
+        pass
+    return None
 
-        if location:
+
+def geocode_places(places: list[PlaceForMap], dest: str) -> list[dict]:
+    """
+    Stage 1: Naver Local Search API로 전체 병렬 조회 (빠름)
+    Stage 2: 실패한 장소만 Nominatim fallback (1.1s 간격 준수)
+    """
+    t0 = time.time()
+    info = DEST_EN_MAP.get(dest)
+    dest_en = info[0] if info else dest
+    dest_country = info[1] if info else None
+    center_lat = info[2] if info else None
+    center_lng = info[3] if info else None
+    max_radius = info[4] if info else 300
+
+    result: list[dict] = []
+    naver_failed: list[PlaceForMap] = []
+
+    def _try_naver(place: PlaceForMap) -> tuple[PlaceForMap, float | None, float | None]:
+        coords = _naver_search_geocode(place, dest)
+        if coords:
+            lat, lng = coords
+            if center_lat is not None and _haversine_km(center_lat, center_lng, lat, lng) > max_radius:
+                return place, None, None
+            return place, lat, lng
+        return place, None, None
+
+    # Stage 1 — 병렬 Naver 검색 (rate limit 없음)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+        for place, lat, lng in ex.map(_try_naver, places[:10]):
+            if lat is not None:
+                result.append({
+                    "name":     html_module.escape(place.name),
+                    "name_raw": place.name,
+                    "en_name":  place.english_name,
+                    "day":      place.day,
+                    "lat":      lat,
+                    "lng":      lng,
+                })
+            else:
+                naver_failed.append(place)
+
+    print(f"[geocode] Naver: {len(result)} found, {len(naver_failed)} failed ({time.time()-t0:.1f}s)")
+
+    # Stage 2 — Nominatim fallback (1.1s 간격 순차)
+    for place in naver_failed:
+        coords = _nominatim_geocode(place, dest_en, dest_country, center_lat, center_lng, max_radius)
+        if coords:
             result.append({
                 "name":     html_module.escape(place.name),
                 "name_raw": place.name,
                 "en_name":  place.english_name,
                 "day":      place.day,
-                "lat":      location.latitude,
-                "lng":      location.longitude,
+                "lat":      coords[0],
+                "lng":      coords[1],
             })
 
+    print(f"[geocode] total: {len(result)}/{len(places[:10])} ({time.time()-t0:.1f}s)")
     return result
 
 
@@ -459,34 +524,53 @@ def build_folium_map(geocoded: list[dict]) -> str | None:
     center_lat = sum(p["lat"] for p in geocoded) / len(geocoded)
     center_lng = sum(p["lng"] for p in geocoded) / len(geocoded)
 
-    m = folium.Map(location=[center_lat, center_lng], zoom_start=13)
+    m = folium.Map(location=[center_lat, center_lng], zoom_start=13,
+                   tiles="CartoDB Positron")  # 깔끔한 배경
 
-    # Day-colored markers
-    for place in geocoded:
-        color = DAY_COLORS[(place["day"] - 1) % len(DAY_COLORS)]
-        folium.Marker(
-            location=[place["lat"], place["lng"]],
-            popup=folium.Popup(
-                f"{place['name']} ({place['day']}일차)", max_width=200
-            ),
-            tooltip=f"{place['day']}일차 | {place['name']}",
-            icon=folium.Icon(color=color, icon="map-marker"),
-        ).add_to(m)
+    # 일차별 그룹화 + 순서 번호 부여
+    by_day: dict[int, list] = defaultdict(list)
+    for p in sorted(geocoded, key=lambda x: x["day"]):
+        by_day[p["day"]].append(p)
 
-    # Day-colored polylines (일차별 색상 경로)
-    if len(geocoded) > 1:
-        by_day: dict[int, list] = defaultdict(list)
-        for p in sorted(geocoded, key=lambda x: x["day"]):
-            by_day[p["day"]].append([p["lat"], p["lng"]])
+    for day_num in sorted(by_day.keys()):
+        places = by_day[day_num]
+        color = DAY_COLORS[(day_num - 1) % len(DAY_COLORS)]
 
-        for day_num in sorted(by_day.keys()):
-            coords = by_day[day_num]
-            if len(coords) > 1:
-                color = DAY_COLORS[(day_num - 1) % len(DAY_COLORS)]
-                folium.PolyLine(
-                    coords, color=color, weight=3, opacity=0.75,
-                    tooltip=f"{day_num}일차 경로",
-                ).add_to(m)
+        # 번호가 있는 원형 마커 (day 내 순서: 1부터 시작)
+        for order, place in enumerate(places, start=1):
+            lat, lng = place["lat"], place["lng"]
+            name = place["name"]
+            icon_html = (
+                f'<div style="'
+                f'background:{color};color:#fff;border-radius:50%;'
+                f'width:30px;height:30px;line-height:30px;text-align:center;'
+                f'font-weight:700;font-size:14px;'
+                f'border:2.5px solid #fff;'
+                f'box-shadow:0 2px 6px rgba(0,0,0,0.35);'
+                f'">{order}</div>'
+            )
+            folium.Marker(
+                location=[lat, lng],
+                popup=folium.Popup(f"{name} ({day_num}일차 {order}번)", max_width=200),
+                tooltip=f"{day_num}일차 {order}번 | {name}",
+                icon=folium.DivIcon(
+                    html=icon_html,
+                    icon_size=(30, 30),
+                    icon_anchor=(15, 15),
+                ),
+            ).add_to(m)
+
+        # 일차 내 점선 경로
+        if len(places) > 1:
+            coords = [[p["lat"], p["lng"]] for p in places]
+            folium.PolyLine(
+                coords,
+                color=color,
+                weight=2.5,
+                opacity=0.85,
+                dash_array="8 5",
+                tooltip=f"{day_num}일차 경로",
+            ).add_to(m)
 
     return m._repr_html_()
 
@@ -507,17 +591,12 @@ def _build_map_html(geocoded: list[dict], total_places: int, budget: str) -> str
     if not folium_html:
         return MAP_ERROR_HTML
 
-    # 일차별 색상 범례 (한국어)
-    COLOR_KO = {
-        "red": "#e53e3e", "blue": "#3182ce", "green": "#38a169",
-        "purple": "#805ad5", "orange": "#dd6b20", "darkred": "#9b2335",
-        "cadetblue": "#4a90a4",
-    }
+    # 일차별 색상 범례 (한국어) — DAY_COLORS는 이제 CSS 색상값
     days_present = sorted({p["day"] for p in geocoded})
     legend_items = "".join(
         f"<span style='margin-right:10px;white-space:nowrap;'>"
-        f"<span style='display:inline-block;width:10px;height:10px;"
-        f"border-radius:50%;background:{COLOR_KO[DAY_COLORS[(d-1)%len(DAY_COLORS)]]};margin-right:4px;'>"
+        f"<span style='display:inline-block;width:12px;height:12px;"
+        f"border-radius:50%;background:{DAY_COLORS[(d-1)%len(DAY_COLORS)]};margin-right:4px;vertical-align:middle;'>"
         f"</span>{d}일차</span>"
         for d in days_present
     )
@@ -785,23 +864,25 @@ def handle_chat(user_input: str, history: list, session_id: str):
             timings["planner_ms"] = round((time.time() - t_plan) * 1000)
             response = fix_maps_links(partial, dest)
 
-            # ── 스트리밍 완료 후 지오코딩 최대 5초 대기 ──
-            geo_thread.join(timeout=5)
-
-            # ── 완성 일정에서 정확한 장소+예산 추출 ──
+            # ── 완성 일정에서 정확한 장소+예산 추출 (bg 지오코딩 동시 진행) ──
+            t_analysis = time.time()
             analysis = extract_itinerary_analysis(response, dest)
+            timings["analysis_ms"] = round((time.time() - t_analysis) * 1000)
 
-            # 배경 지오코딩 결과와 병합 (en_name으로 매칭)
-            bg_by_en: dict[str, dict] = {
-                g["en_name"]: g for g in geo_state["geocoded"]
-            }
+            # analysis 완료 후 join (분석 소요 시간만큼 bg geocoding 추가 여유)
+            geo_thread.join(timeout=30)
+
+            # 배경 지오코딩 결과와 병합 (name_raw, en_name 모두로 매칭)
+            bg_by_en: dict[str, dict] = {g["en_name"]: g for g in geo_state["geocoded"]}
+            bg_by_kr: dict[str, dict] = {g["name_raw"]: g for g in geo_state["geocoded"]}
 
             final_geocoded: list[dict] = []
             missing_places: list[PlaceForMap] = []
 
             for place in analysis.places:
-                if place.english_name in bg_by_en:
-                    g = dict(bg_by_en[place.english_name])
+                matched = bg_by_en.get(place.english_name) or bg_by_kr.get(place.name)
+                if matched:
+                    g = dict(matched)
                     g["day"] = place.day  # 정확한 일차 반영
                     final_geocoded.append(g)
                 else:
@@ -811,6 +892,7 @@ def handle_chat(user_input: str, history: list, session_id: str):
             if missing_places:
                 extra = geocode_places(missing_places[:5], dest)
                 final_geocoded.extend(extra)
+            print(f"[map] final={len(final_geocoded)} places, missing={len(missing_places)}")
 
             map_out = _build_map_html(
                 final_geocoded,
@@ -884,14 +966,25 @@ CSS = """
     #main-row {
         flex-direction: row !important;
         flex-wrap: nowrap !important;
+        align-items: flex-start !important;
     }
     #chat-col {
         flex: 1 1 0% !important;
-        min-width: 450px !important;
+        min-width: 420px !important;
+        overflow: visible !important;
     }
     #side-col {
-        flex: 0 0 300px !important;
-        min-width: 300px !important;
+        flex: 0 0 280px !important;
+        min-width: 260px !important;
+        max-width: 280px !important;
+        overflow: visible !important;
+    }
+    /* 사이드 패널 버튼 텍스트 줄바꿈 허용 */
+    #side-col button {
+        white-space: normal !important;
+        height: auto !important;
+        min-height: 38px !important;
+        padding: 6px 10px !important;
     }
 }
 """
@@ -954,18 +1047,11 @@ def build_ui() -> gr.Blocks:
                 gr.Markdown("### 💾 대화 저장")
                 save_btn = gr.Button("📥 JSON으로 저장", variant="primary")
                 save_status = gr.Textbox(label="저장 상태", interactive=False, lines=2)
-                download_file = gr.File(label="📄 파일 다운로드", visible=False)
-                gr.HTML(f"""
-                <p style="font-size:12px; color:#9ca3af; margin-top:8px; line-height:1.6;">
-                  📂 저장 위치<br>
-                  <code style="background:#f3f4f6; padding:2px 6px; border-radius:4px;">
-                    {LOGS_DIR.resolve()}
-                  </code><br>
-                  <span style="margin-top:4px; display:block;">
-                    파일명: <code>날짜_세션ID.json</code>
-                  </span>
-                </p>
-                """)
+                download_btn = gr.DownloadButton(
+                    label="⬇️ 파일 다운로드",
+                    visible=False,
+                    variant="secondary",
+                )
 
         # ── 이벤트 핸들러 ─────────────────────────────────────────
         def on_load():
@@ -1014,7 +1100,7 @@ def build_ui() -> gr.Blocks:
             return status, gr.update(value=filepath, visible=bool(filepath))
 
         save_btn.click(on_save, inputs=[chatbot, current_session],
-                       outputs=[save_status, download_file])
+                       outputs=[save_status, download_btn])
 
     return demo
 
