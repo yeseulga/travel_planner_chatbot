@@ -652,9 +652,12 @@ def build_google_map(geocoded: list[dict], dest: str = "") -> str | None:
         gmap_js = "\n  ".join(gmap_parts)
         leaf_js = "\n  ".join(leaf_parts)
 
+        # fitBounds용 좌표 배열 (공항 제외, 장소만)
+        all_latlngs_js = "[" + ",".join(
+            f"[{p['lat']},{p['lng']}]" for p in geocoded
+        ) + "]"
+
         # ── 완전한 HTML 문서 (iframe 내부) ─────────────────────
-        # {{...}} → {…} in the rendered string (f-string escaping)
-        # Leaflet tile URL 중 {s}/{z}/{x}/{y}는 {{s}}/{{z}}/{{x}}/{{y}}로 작성
         inner_html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -662,13 +665,21 @@ def build_google_map(geocoded: list[dict], dest: str = "") -> str | None:
 <style>
 body,html{{margin:0;padding:0;height:100%;overflow:hidden;}}
 #map{{width:100%;height:100%;}}
+#pac-input{{
+  margin:8px;padding:6px 10px;width:220px;
+  border:1px solid #ccc;border-radius:4px;
+  font-size:13px;box-shadow:0 2px 6px rgba(0,0,0,.2);
+  outline:none;
+}}
 </style>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 </head>
 <body>
 <div id="map"></div>
+<input id="pac-input" type="text" placeholder="장소 검색...">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
+var ALL_LATLNGS = {all_latlngs_js};
 var CENTER = [{center_lat}, {center_lng}];
 var mapRendered = false;
 
@@ -680,6 +691,9 @@ function showLeaflet() {{
     attribution: '&copy; OpenStreetMap contributors'
   }}).addTo(map);
   {leaf_js}
+  if (ALL_LATLNGS.length > 1) {{
+    map.fitBounds(ALL_LATLNGS, {{padding: [40, 40], maxZoom: 15}});
+  }}
 }}
 
 function initGoogleMaps() {{
@@ -694,6 +708,25 @@ function initGoogleMaps() {{
     gestureHandling: 'greedy'
   }});
   {gmap_js}
+  if (ALL_LATLNGS.length > 1) {{
+    var bounds = new google.maps.LatLngBounds();
+    ALL_LATLNGS.forEach(function(ll) {{ bounds.extend({{lat:ll[0],lng:ll[1]}}); }});
+    m.fitBounds(bounds);
+    google.maps.event.addListenerOnce(m, 'bounds_changed', function() {{
+      if (m.getZoom() > 15) m.setZoom(15);
+    }});
+  }}
+  var input = document.getElementById('pac-input');
+  var searchBox = new google.maps.places.SearchBox(input);
+  m.controls[google.maps.ControlPosition.TOP_LEFT].push(input);
+  searchBox.addListener('places_changed', function() {{
+    var places = searchBox.getPlaces();
+    if (!places || places.length === 0) return;
+    var place = places[0];
+    if (!place.geometry) return;
+    m.setCenter(place.geometry.location);
+    m.setZoom(15);
+  }});
 }}
 
 window.gm_authFailure = function() {{
@@ -703,7 +736,7 @@ window.gm_authFailure = function() {{
 
 var gto = setTimeout(showLeaflet, 5000);
 var s = document.createElement('script');
-s.src = 'https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&language=ko&callback=initGoogleMaps';
+s.src = 'https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&libraries=places&language=ko&callback=initGoogleMaps';
 s.onerror = function() {{ clearTimeout(gto); showLeaflet(); }};
 document.head.appendChild(s);
 </script>
