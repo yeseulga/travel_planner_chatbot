@@ -675,7 +675,7 @@ var mapRendered = false;
 function showLeaflet() {{
   if (mapRendered) return;
   mapRendered = true;
-  var map = L.map('map').setView(CENTER, 13);
+  var map = L.map('map', {{scrollWheelZoom: true}}).setView(CENTER, 13);
   L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
     attribution: '&copy; OpenStreetMap contributors'
   }}).addTo(map);
@@ -690,7 +690,8 @@ function initGoogleMaps() {{
   var m = new google.maps.Map(el, {{
     center: {{lat: CENTER[0], lng: CENTER[1]}},
     zoom: 13, mapTypeControl: false,
-    streetViewControl: false, fullscreenControl: false
+    streetViewControl: false, fullscreenControl: false,
+    gestureHandling: 'greedy'
   }});
   {gmap_js}
 }}
