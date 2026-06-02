@@ -615,29 +615,72 @@ def build_google_map(geocoded: list[dict], dest: str = "") -> str | None:
 
     js_code = "\n".join(js_parts)
 
-    # 직접 DOM 주입 — google.maps 이미 로드 시 재사용, 미로드 시 script 동적 삽입
-    return f"""<div id="{map_div}" style="width:100%;height:360px;border-radius:8px;"></div>
+    err_html = (
+        "display:flex;align-items:center;justify-content:center;"
+        "flex-direction:column;height:100%;gap:8px;color:#9ca3af;"
+        "font-size:13px;text-align:center;padding:20px;"
+    )
+
+    # ── DOM 주입 방식 ────────────────────────────────────────────
+    # Gradio 5는 innerHTML 업데이트 시 <script>를 실행하지 않으므로
+    # window.__gmapPending__ 큐에 init 함수를 등록하고,
+    # SDK 로드가 완료되면 __gmapInit__ 콜백이 큐 전체를 실행한다.
+    # ─────────────────────────────────────────────────────────────
+    return f"""<div id="{map_div}" style="width:100%;height:360px;border-radius:8px;background:#f0f0f0;"></div>
 <script>
 (function(){{
-  function {init_fn}(){{
-    var el=document.getElementById('{map_div}');
+  // ── 전역 pending 큐 ──
+  if(!window.__gmapPending__)window.__gmapPending__=[];
+
+  // 이 렌더용 init 함수
+  var divId='{map_div}';
+  var clat={center_lat},clng={center_lng};
+
+  function runInit(){{
+    var el=document.getElementById(divId);
     if(!el)return;
-    var m=new google.maps.Map(el,{{
-      center:{{lat:{center_lat},lng:{center_lng}}},
-      zoom:13,mapTypeControl:false,streetViewControl:false,fullscreenControl:false
-    }});
-    {js_code}
+    try{{
+      var m=new google.maps.Map(el,{{
+        center:{{lat:clat,lng:clng}},zoom:13,
+        mapTypeControl:false,streetViewControl:false,fullscreenControl:false
+      }});
+      {js_code}
+    }}catch(e){{
+      el.innerHTML='<div style="{err_html}"><div style=\\"font-size:24px\\">🗺️</div><div>지도 초기화 실패: '+e.message+'</div></div>';
+    }}
   }}
+
+  // 큐에 등록
+  window.__gmapPending__.push(runInit);
+
+  // Auth 실패 핸들러 (API 키 권한 오류)
+  window.gm_authFailure=function(){{
+    var el=document.getElementById(divId);
+    if(el)el.innerHTML='<div style="{err_html}"><div style=\\"font-size:24px\\">🗺️</div><div>Google Maps 인증 실패.<br>Cloud Console에서 <b>Maps JavaScript API</b>를 활성화해주세요.</div></div>';
+  }};
+
+  function flushQueue(){{
+    var fns=window.__gmapPending__.splice(0);
+    fns.forEach(function(fn){{fn();}});
+  }}
+
   if(typeof google!=='undefined'&&google.maps){{
-    {init_fn}();
+    // SDK 이미 로드됨 → 바로 실행
+    setTimeout(flushQueue,0);
   }}else{{
-    window['{init_fn}']=function(){{{init_fn}();}};
-    if(!document.querySelector('script[data-gmaps-key]')){{
+    // SDK 로드 필요 — 단일 콜백 __gmapInit__ 으로 큐 전체 실행
+    window.__gmapInit__=flushQueue;
+    if(!document.querySelector('script[data-gmaps-sdk]')){{
       var s=document.createElement('script');
-      s.setAttribute('data-gmaps-key','1');
-      s.src='https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&language=ko&callback={init_fn}';
+      s.setAttribute('data-gmaps-sdk','1');
+      s.src='https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&language=ko&callback=__gmapInit__';
+      s.onerror=function(){{
+        var el=document.getElementById(divId);
+        if(el)el.innerHTML='<div style="{err_html}"><div style=\\"font-size:24px\\">🗺️</div><div>Maps SDK 로드 실패.<br>API 키와 네트워크를 확인해주세요.</div></div>';
+      }};
       document.head.appendChild(s);
     }}
+    // else: SDK 로딩 중 → 콜백이 큐를 실행할 예정
   }}
 }})();
 </script>"""
