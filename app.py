@@ -397,11 +397,15 @@ def _google_geocode(place: "PlaceForMap", dest: str) -> tuple[float, float] | No
                 timeout=5,
             )
             data = resp.json()
-            if data.get("status") == "OK" and data.get("results"):
+            status = data.get("status")
+            if status == "OK" and data.get("results"):
                 loc = data["results"][0]["geometry"]["location"]
                 return loc["lat"], loc["lng"]
-        except Exception:
-            pass
+            elif status != "ZERO_RESULTS":
+                print(f"[geocode] Places API status={status} query={query!r}")
+        except Exception as e:
+            print(f"[geocode] exception for {query!r}: {e}")
+    print(f"[geocode] FAILED: name={place.name!r} en={place.english_name!r}")
     return None
 
 
@@ -675,7 +679,8 @@ function initGoogleMaps() {{
 }}
 
 window.gm_authFailure = function() {{
-  if (!mapRendered) showLeaflet();
+  mapRendered = false;
+  showLeaflet();
 }};
 
 var gto = setTimeout(showLeaflet, 5000);
