@@ -389,11 +389,23 @@ def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
 def _google_geocode(place: "PlaceForMap", dest: str) -> tuple[float, float] | None:
     """Google Places Text Search API로 좌표 조회 (빠름, 글로벌, 병렬 가능)."""
     import requests
-    for query in (f"{place.name} {dest}", f"{place.english_name} {dest}"):
+    # dest 포함 쿼리 우선, 마지막 fallback으로 dest 없이 시도
+    queries = [
+        f"{place.name} {dest}",
+        f"{place.english_name} {dest}",
+        place.english_name,
+        place.name,
+    ]
+    seen: set[str] = set()
+    for query in queries:
+        q = query.strip()
+        if not q or q in seen:
+            continue
+        seen.add(q)
         try:
             resp = requests.get(
                 "https://maps.googleapis.com/maps/api/place/textsearch/json",
-                params={"query": query, "key": GOOGLE_MAPS_API_KEY, "language": "ko"},
+                params={"query": q, "key": GOOGLE_MAPS_API_KEY, "language": "ko"},
                 timeout=5,
             )
             data = resp.json()
@@ -401,10 +413,10 @@ def _google_geocode(place: "PlaceForMap", dest: str) -> tuple[float, float] | No
             if status == "OK" and data.get("results"):
                 loc = data["results"][0]["geometry"]["location"]
                 return loc["lat"], loc["lng"]
-            elif status != "ZERO_RESULTS":
-                print(f"[geocode] Places API status={status} query={query!r}")
+            elif status not in ("ZERO_RESULTS", "OK"):
+                print(f"[geocode] Places API status={status} query={q!r}")
         except Exception as e:
-            print(f"[geocode] exception for {query!r}: {e}")
+            print(f"[geocode] exception for {q!r}: {e}")
     print(f"[geocode] FAILED: name={place.name!r} en={place.english_name!r}")
     return None
 
@@ -442,10 +454,11 @@ def _nominatim_geocode(
     return None
 
 
-def geocode_places(places: list[PlaceForMap], dest: str) -> list[dict]:
+def geocode_places(places: list[PlaceForMap], dest: str) -> tuple[list[dict], list[str]]:
     """
     Stage 1: Google Geocoding API 병렬 조회 (빠름, 글로벌)
     Stage 2: 실패한 장소만 Nominatim fallback
+    Returns: (geocoded_list, failed_names)
     """
     t0 = time.time()
     info = DEST_EN_MAP.get(dest)
@@ -485,6 +498,7 @@ def geocode_places(places: list[PlaceForMap], dest: str) -> list[dict]:
     print(f"[geocode] Google: {len(result)} found, {len(google_failed)} failed ({time.time()-t0:.1f}s)")
 
     # Stage 2 — Nominatim fallback
+    nominatim_failed: list[PlaceForMap] = []
     for place in google_failed:
         coords = _nominatim_geocode(place, dest_en, dest_country, center_lat, center_lng, max_radius)
         if coords:
@@ -496,9 +510,12 @@ def geocode_places(places: list[PlaceForMap], dest: str) -> list[dict]:
                 "lat":      coords[0],
                 "lng":      coords[1],
             })
+        else:
+            nominatim_failed.append(place)
 
-    print(f"[geocode] total: {len(result)}/{len(places[:10])} ({time.time()-t0:.1f}s)")
-    return result
+    failed_names = [p.name for p in nominatim_failed]
+    print(f"[geocode] total: {len(result)}/{len(places[:10])}, still failed: {failed_names} ({time.time()-t0:.1f}s)")
+    return result, failed_names
 
 
 def predict_places_from_search(
@@ -714,7 +731,7 @@ def _budget_html(budget: str) -> str:
     )
 
 
-def _build_map_html(geocoded: list[dict], total_places: int, budget: str, dest: str = "") -> str:
+def _build_map_html(geocoded: list[dict], failed_names: list[str], budget: str, dest: str = "") -> str:
     """Google Maps + 한국어 범례 + 경고 + 예산 요약을 합쳐서 반환."""
     folium_html = build_google_map(geocoded, dest)
     if not folium_html:
@@ -735,12 +752,12 @@ def _build_map_html(geocoded: list[dict], total_places: int, budget: str, dest: 
         f"🗺️ 여행 경로 &nbsp; {legend_items}</div>"
     ) if days_present else ""
 
-    miss = total_places - len(geocoded)
     warning = ""
-    if miss > 0:
+    if failed_names:
+        names_str = ", ".join(html_module.escape(n) for n in failed_names)
         warning = (
             f"<p style='font-size:11px;color:#f59e0b;margin:4px 8px 2px;'>"
-            f"⚠️ {miss}개 장소의 좌표를 가져오지 못했습니다.</p>"
+            f"⚠️ 지도에 표시하지 못한 장소: {names_str}</p>"
         )
 
     budget_part = _budget_html(budget) if budget.strip() else ""
@@ -957,7 +974,7 @@ def handle_chat(user_input: str, history: list, session_id: str):
                         dest,
                         districts,
                     )
-                    geo_state["geocoded"] = geocode_places(predicted, dest)
+                    geo_state["geocoded"], _ = geocode_places(predicted, dest)
                 except Exception as e:
                     print(f"[bg geocode] {e}")
                 finally:
@@ -1010,14 +1027,15 @@ def handle_chat(user_input: str, history: list, session_id: str):
                     missing_places.append(place)
 
             # 아직 지오코딩 안 된 장소 추가 처리 (최대 5개)
+            all_failed_names: list[str] = []
             if missing_places:
-                extra = geocode_places(missing_places[:5], dest)
+                extra, all_failed_names = geocode_places(missing_places[:5], dest)
                 final_geocoded.extend(extra)
-            print(f"[map] final={len(final_geocoded)} places, missing={len(missing_places)}")
+            print(f"[map] final={len(final_geocoded)} places, failed={all_failed_names}")
 
             map_out = _build_map_html(
                 final_geocoded,
-                len(analysis.places),
+                all_failed_names,
                 analysis.budget_summary,
                 dest or "",
             )
