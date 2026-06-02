@@ -165,7 +165,7 @@ class PlacesPrediction(BaseModel):
 
 
 class ItineraryAnalysis(BaseModel):
-    places: list[PlaceForMap]  # 관광지+맛집, 최대 10개
+    places: list[PlaceForMap]  # 관광지+맛집, 최대 20개
     budget_summary: str         # 예산 한 줄 요약
 
 
@@ -261,9 +261,10 @@ def get_itinerary_analysis_prompt() -> ChatPromptTemplate:
         ("system",
          """여행 일정 텍스트에서 두 가지를 추출하세요.
 
-1. places: 지도에 표시할 장소 (최대 10개)
+1. places: 지도에 표시할 장소 (일차별 최대 4개, 전체 최대 20개)
    - 관광지, 맛집, 카페만 포함
    - 숙소·공항·역·버스·패스·입장권 등 제외
+   - 반드시 모든 일차의 장소를 균등하게 포함 (특정 일차 누락 금지)
    - name: 한국어 또는 현지 표시명
    - english_name: Nominatim 검색용 영어 이름 (도시명 포함 금지, 장소명만)
      예: "센소지" → "Senso-ji Temple"
@@ -282,7 +283,7 @@ def get_itinerary_analysis_prompt() -> ChatPromptTemplate:
 def get_places_prediction_prompt() -> ChatPromptTemplate:
     return ChatPromptTemplate.from_messages([
         ("system",
-         """여행 검색 결과에서 일정에 포함될 가능성이 높은 관광지와 맛집을 최대 8개 예측하세요.
+         """여행 검색 결과에서 일정에 포함될 가능성이 높은 관광지와 맛집을 최대 15개 예측하세요.
 - name: 한국어 또는 현지 표시명
 - english_name: Nominatim 검색용 영어 이름 (장소명만, 도시명 제외)
 - day: 구역 순서 기반 예측 일차 (구역 1→1일차, 구역 2→2일차…)
@@ -481,8 +482,8 @@ def geocode_places(places: list[PlaceForMap], dest: str) -> tuple[list[dict], li
         return place, None, None
 
     # Stage 1 — 병렬 Google 지오코딩 (rate limit 없음)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
-        for place, lat, lng in ex.map(_try_google, places[:10]):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as ex:
+        for place, lat, lng in ex.map(_try_google, places[:20]):
             if lat is not None:
                 result.append({
                     "name":     html_module.escape(place.name),
@@ -514,7 +515,7 @@ def geocode_places(places: list[PlaceForMap], dest: str) -> tuple[list[dict], li
             nominatim_failed.append(place)
 
     failed_names = [p.name for p in nominatim_failed]
-    print(f"[geocode] total: {len(result)}/{len(places[:10])}, still failed: {failed_names} ({time.time()-t0:.1f}s)")
+    print(f"[geocode] total: {len(result)}/{len(places[:20])}, still failed: {failed_names} ({time.time()-t0:.1f}s)")
     return result, failed_names
 
 
@@ -535,7 +536,7 @@ def predict_places_from_search(
             "attractions": attractions[:1500],
             "food": food[:800],
         })
-        return result.places[:8]
+        return result.places[:15]
     except Exception as e:
         print(f"[predict_places] {e}")
         return []
@@ -1063,7 +1064,7 @@ def handle_chat(user_input: str, history: list, session_id: str):
             # 아직 지오코딩 안 된 장소 추가 처리 (최대 5개)
             all_failed_names: list[str] = []
             if missing_places:
-                extra, all_failed_names = geocode_places(missing_places[:5], dest)
+                extra, all_failed_names = geocode_places(missing_places[:20], dest)
                 final_geocoded.extend(extra)
             print(f"[map] final={len(final_geocoded)} places, failed={all_failed_names}")
 
