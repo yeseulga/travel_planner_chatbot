@@ -539,151 +539,164 @@ def extract_itinerary_analysis(itinerary_text: str, dest: str) -> ItineraryAnaly
 # Map Building
 # ============================================================
 def build_google_map(geocoded: list[dict], dest: str = "") -> str | None:
-    """Google Maps JS API — 직접 DOM 주입 방식 (srcdoc iframe 없음).
-    srcdoc의 null-origin 문제를 피하기 위해 gr.HTML에 script 태그를 직접 삽입.
+    """srcdoc iframe — Google Maps (primary) + Leaflet/OSM (5s 자동 폴백).
+
+    - sandbox 없음: 외부 스크립트(Maps SDK, Leaflet CDN) 로드 허용
+    - iframe 내부 window에 JS 완전 격리 → Gradio 글로벌 스코프 오염 없음
+    - Google Maps 5초 타임아웃 또는 인증 실패 시 Leaflet/OSM으로 자동 전환
     """
     if not geocoded:
         return None
 
-    center_lat = sum(p["lat"] for p in geocoded) / len(geocoded)
-    center_lng = sum(p["lng"] for p in geocoded) / len(geocoded)
+    try:
+        center_lat = sum(p["lat"] for p in geocoded) / len(geocoded)
+        center_lng = sum(p["lng"] for p in geocoded) / len(geocoded)
 
-    # 유니크 ID로 동일 페이지 내 다중 인스턴스 충돌 방지
-    uid = uuid.uuid4().hex[:8]
-    map_div = f"gmap_{uid}"
-    init_fn = f"gmapInit_{uid}"
+        by_day: dict[int, list] = defaultdict(list)
+        for p in sorted(geocoded, key=lambda x: x["day"]):
+            by_day[p["day"]].append(p)
 
-    by_day: dict[int, list] = defaultdict(list)
-    for p in sorted(geocoded, key=lambda x: x["day"]):
-        by_day[p["day"]].append(p)
+        gmap_parts: list[str] = []
+        leaf_parts: list[str] = []
 
-    js_parts: list[str] = []
-
-    # 공항 마커 (특별 핀 스타일)
-    if dest and dest in DEST_AIRPORTS:
-        ap_name, ap_lat, ap_lng = DEST_AIRPORTS[dest]
-        ap_safe = ap_name.replace("'", "\\'")
-        # SVG 핀 모양 아이콘 (파란색 테두리, 비행기 이모지)
-        ap_svg = (
-            '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="50" viewBox="0 0 40 50">'
-            '<path d="M20 0 C8.95 0 0 8.95 0 20 C0 33 20 50 20 50 C20 50 40 33 40 20 C40 8.95 31.05 0 20 0Z"'
-            ' fill="#5ba3dc" stroke="#2d6ea8" stroke-width="2.5"/>'
-            '<circle cx="20" cy="20" r="12" fill="white" stroke="#2d6ea8" stroke-width="1.5"/>'
-            '<text x="20" y="26" text-anchor="middle" fill="#2d6ea8"'
-            ' font-size="16" font-family="sans-serif">&#x2708;</text>'
-            '</svg>'
-        )
-        ap_icon_url = f"data:image/svg+xml;charset=UTF-8,{quote(ap_svg)}"
-        js_parts.append(
-            f"new google.maps.Marker({{"
-            f"position:{{lat:{ap_lat},lng:{ap_lng}}},"
-            f"map:m,"
-            f"icon:{{url:'{ap_icon_url}',scaledSize:new google.maps.Size(40,50),"
-            f"anchor:new google.maps.Point(20,50)}},"
-            f"title:'{ap_safe}',zIndex:100"
-            f"}});"
-        )
-
-    # 일차별 번호 마커 + 점선 경로
-    for day_num in sorted(by_day.keys()):
-        places = by_day[day_num]
-        color = DAY_COLORS[(day_num - 1) % len(DAY_COLORS)]
-
-        for order, p in enumerate(places, 1):
-            safe_name = p["name"].replace("\\", "\\\\").replace("'", "\\'")
-            js_parts.append(
-                f"new google.maps.Marker({{"
-                f"position:{{lat:{p['lat']},lng:{p['lng']}}},"
-                f"map:m,"
-                f"label:{{text:'{order}',color:'#fff',fontWeight:'700',fontSize:'13px'}},"
-                f"icon:{{path:google.maps.SymbolPath.CIRCLE,scale:14,"
-                f"fillColor:'{color}',fillOpacity:1,strokeColor:'#fff',strokeWeight:2.5}},"
-                f"title:'{safe_name} ({day_num}일차 {order}번)'"
-                f"}});"
+        # ── 공항 마커 ───────────────────────────────────────────
+        if dest and dest in DEST_AIRPORTS:
+            ap_name, ap_lat, ap_lng = DEST_AIRPORTS[dest]
+            ap_safe = ap_name.replace("\\", "\\\\").replace("'", "\\'")
+            ap_svg = (
+                '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="50" viewBox="0 0 40 50">'
+                '<path d="M20 0 C8.95 0 0 8.95 0 20 C0 33 20 50 20 50 C20 50 40 33 40 20'
+                ' C40 8.95 31.05 0 20 0Z" fill="#5ba3dc" stroke="#2d6ea8" stroke-width="2.5"/>'
+                '<circle cx="20" cy="20" r="12" fill="white" stroke="#2d6ea8" stroke-width="1.5"/>'
+                '<text x="20" y="26" text-anchor="middle" fill="#2d6ea8"'
+                ' font-size="16" font-family="sans-serif">&#x2708;</text></svg>'
+            )
+            ap_icon_url = f"data:image/svg+xml;charset=UTF-8,{quote(ap_svg)}"
+            gmap_parts.append(
+                f"new google.maps.Marker({{position:{{lat:{ap_lat},lng:{ap_lng}}},"
+                f"map:m,icon:{{url:'{ap_icon_url}',scaledSize:new google.maps.Size(40,50),"
+                f"anchor:new google.maps.Point(20,50)}},title:'{ap_safe}',zIndex:100}});"
+            )
+            leaf_parts.append(
+                f"L.marker([{ap_lat},{ap_lng}]).addTo(map).bindPopup('{ap_safe} &#x2708;');"
             )
 
-        if len(places) > 1:
-            path = ",".join(f"{{lat:{p['lat']},lng:{p['lng']}}}" for p in places)
-            js_parts.append(
-                f"new google.maps.Polyline({{"
-                f"path:[{path}],geodesic:false,strokeOpacity:0,"
-                f"icons:[{{icon:{{path:'M 0,-1 0,1',"
-                f"strokeOpacity:0.9,strokeColor:'{color}',scale:3}},"
-                f"offset:'0',repeat:'12px'}}],map:m"
-                f"}});"
-            )
+        # ── 일차별 번호 마커 + 점선 경로 ────────────────────────
+        for day_num in sorted(by_day.keys()):
+            places = by_day[day_num]
+            color = DAY_COLORS[(day_num - 1) % len(DAY_COLORS)]
 
-    js_code = "\n".join(js_parts)
+            for order, p in enumerate(places, 1):
+                safe_name = p["name"].replace("\\", "\\\\").replace("'", "\\'")
+                popup = f"{safe_name} ({day_num}일차 {order}번)"
 
-    err_html = (
-        "display:flex;align-items:center;justify-content:center;"
-        "flex-direction:column;height:100%;gap:8px;color:#9ca3af;"
-        "font-size:13px;text-align:center;padding:20px;"
-    )
+                gmap_parts.append(
+                    f"new google.maps.Marker({{position:{{lat:{p['lat']},lng:{p['lng']}}},"
+                    f"map:m,"
+                    f"label:{{text:'{order}',color:'#fff',fontWeight:'700',fontSize:'13px'}},"
+                    f"icon:{{path:google.maps.SymbolPath.CIRCLE,scale:14,"
+                    f"fillColor:'{color}',fillOpacity:1,strokeColor:'#fff',strokeWeight:2.5}},"
+                    f"title:'{popup}'}});"
+                )
+                # Leaflet: 색상 원 + 숫자 레이블
+                leaf_parts.append(
+                    f"L.circleMarker([{p['lat']},{p['lng']}],"
+                    f"{{radius:14,fillColor:'{color}',color:'white',"
+                    f"weight:2.5,opacity:1,fillOpacity:1}})"
+                    f".addTo(map).bindPopup('{popup}');"
+                )
+                leaf_parts.append(
+                    f"L.marker([{p['lat']},{p['lng']}],{{icon:L.divIcon({{className:'',"
+                    f"html:'<div style=\"color:white;font-weight:700;font-size:13px;"
+                    f"text-align:center;line-height:28px;\">{order}</div>',"
+                    f"iconSize:[28,28],iconAnchor:[14,14]}})}})"
+                    f".addTo(map);"
+                )
 
-    # ── DOM 주입 방식 ────────────────────────────────────────────
-    # Gradio 5는 innerHTML 업데이트 시 <script>를 실행하지 않으므로
-    # window.__gmapPending__ 큐에 init 함수를 등록하고,
-    # SDK 로드가 완료되면 __gmapInit__ 콜백이 큐 전체를 실행한다.
-    # ─────────────────────────────────────────────────────────────
-    return f"""<div id="{map_div}" style="width:100%;height:360px;border-radius:8px;background:#f0f0f0;"></div>
+            if len(places) > 1:
+                gmap_path = ",".join(f"{{lat:{p['lat']},lng:{p['lng']}}}" for p in places)
+                leaf_path = ",".join(f"[{p['lat']},{p['lng']}]" for p in places)
+                gmap_parts.append(
+                    f"new google.maps.Polyline({{path:[{gmap_path}],geodesic:false,"
+                    f"strokeOpacity:0,icons:[{{icon:{{path:'M 0,-1 0,1',"
+                    f"strokeOpacity:0.9,strokeColor:'{color}',scale:3}},"
+                    f"offset:'0',repeat:'12px'}}],map:m}});"
+                )
+                leaf_parts.append(
+                    f"L.polyline([{leaf_path}],"
+                    f"{{color:'{color}',weight:3,opacity:0.8,dashArray:'8,8'}})"
+                    f".addTo(map);"
+                )
+
+        gmap_js = "\n  ".join(gmap_parts)
+        leaf_js = "\n  ".join(leaf_parts)
+
+        # ── 완전한 HTML 문서 (iframe 내부) ─────────────────────
+        # {{...}} → {…} in the rendered string (f-string escaping)
+        # Leaflet tile URL 중 {s}/{z}/{x}/{y}는 {{s}}/{{z}}/{{x}}/{{y}}로 작성
+        inner_html = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+body,html{{margin:0;padding:0;height:100%;overflow:hidden;}}
+#map{{width:100%;height:100%;}}
+</style>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+<body>
+<div id="map"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-(function(){{
-  // ── 전역 pending 큐 ──
-  if(!window.__gmapPending__)window.__gmapPending__=[];
+var CENTER = [{center_lat}, {center_lng}];
+var mapRendered = false;
 
-  // 이 렌더용 init 함수
-  var divId='{map_div}';
-  var clat={center_lat},clng={center_lng};
+function showLeaflet() {{
+  if (mapRendered) return;
+  mapRendered = true;
+  var map = L.map('map').setView(CENTER, 13);
+  L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+    attribution: '&copy; OpenStreetMap contributors'
+  }}).addTo(map);
+  {leaf_js}
+}}
 
-  function runInit(){{
-    var el=document.getElementById(divId);
-    if(!el)return;
-    try{{
-      var m=new google.maps.Map(el,{{
-        center:{{lat:clat,lng:clng}},zoom:13,
-        mapTypeControl:false,streetViewControl:false,fullscreenControl:false
-      }});
-      {js_code}
-    }}catch(e){{
-      el.innerHTML='<div style="{err_html}"><div style=\\"font-size:24px\\">🗺️</div><div>지도 초기화 실패: '+e.message+'</div></div>';
-    }}
-  }}
+function initGoogleMaps() {{
+  if (mapRendered) return;
+  mapRendered = true;
+  clearTimeout(gto);
+  var el = document.getElementById('map');
+  var m = new google.maps.Map(el, {{
+    center: {{lat: CENTER[0], lng: CENTER[1]}},
+    zoom: 13, mapTypeControl: false,
+    streetViewControl: false, fullscreenControl: false
+  }});
+  {gmap_js}
+}}
 
-  // 큐에 등록
-  window.__gmapPending__.push(runInit);
+window.gm_authFailure = function() {{
+  if (!mapRendered) showLeaflet();
+}};
 
-  // Auth 실패 핸들러 (API 키 권한 오류)
-  window.gm_authFailure=function(){{
-    var el=document.getElementById(divId);
-    if(el)el.innerHTML='<div style="{err_html}"><div style=\\"font-size:24px\\">🗺️</div><div>Google Maps 인증 실패.<br>Cloud Console에서 <b>Maps JavaScript API</b>를 활성화해주세요.</div></div>';
-  }};
+var gto = setTimeout(showLeaflet, 5000);
+var s = document.createElement('script');
+s.src = 'https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&language=ko&callback=initGoogleMaps';
+s.onerror = function() {{ clearTimeout(gto); showLeaflet(); }};
+document.head.appendChild(s);
+</script>
+</body>
+</html>"""
 
-  function flushQueue(){{
-    var fns=window.__gmapPending__.splice(0);
-    fns.forEach(function(fn){{fn();}});
-  }}
+        srcdoc_attr = html_module.escape(inner_html, quote=True)
+        return (
+            f'<iframe srcdoc="{srcdoc_attr}" '
+            f'style="width:100%;height:360px;border:none;border-radius:8px;" '
+            f'allowfullscreen></iframe>'
+        )
 
-  if(typeof google!=='undefined'&&google.maps){{
-    // SDK 이미 로드됨 → 바로 실행
-    setTimeout(flushQueue,0);
-  }}else{{
-    // SDK 로드 필요 — 단일 콜백 __gmapInit__ 으로 큐 전체 실행
-    window.__gmapInit__=flushQueue;
-    if(!document.querySelector('script[data-gmaps-sdk]')){{
-      var s=document.createElement('script');
-      s.setAttribute('data-gmaps-sdk','1');
-      s.src='https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&language=ko&callback=__gmapInit__';
-      s.onerror=function(){{
-        var el=document.getElementById(divId);
-        if(el)el.innerHTML='<div style="{err_html}"><div style=\\"font-size:24px\\">🗺️</div><div>Maps SDK 로드 실패.<br>API 키와 네트워크를 확인해주세요.</div></div>';
-      }};
-      document.head.appendChild(s);
-    }}
-    // else: SDK 로딩 중 → 콜백이 큐를 실행할 예정
-  }}
-}})();
-</script>"""
+    except Exception as e:
+        print(f"[build_google_map] error: {e}")
+        return None
 
 
 def _budget_html(budget: str) -> str:
